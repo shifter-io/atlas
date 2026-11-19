@@ -131,7 +131,17 @@ every_minutes = 1320
 engine = "camoufox"
 browser_seconds = 5800
 answer_wait_s = 60
-block_resources = []
+block_resources = ["image", "media", "font"]
+# BROWSER-BYTES-3: ChatGPT's content-hashed app files (public, immutable) come from the host's
+# cache after a network's first try; the page, its anti-bot script and the answer stay live.
+# Google's sign-in prompt is never shown to a logged-out visitor.
+block_urls = ["https://accounts.google.com/gsi/*"]
+cache_urls = [
+  "https://chatgpt.com/unauth-mweb/assets/*",
+  "https://chatgpt.com/unauth-mweb/scripts/*",
+  "https://chatgpt.com/cdn/assets/*",
+  "https://chatgpt.com/_next/static/*",
+]
 inputs = ["example question"]   # exactly one fixed question
 
 [[target]]
@@ -142,6 +152,17 @@ engine = "chrome"
 browser_seconds = 1360
 timeout_s = 60
 answer_wait_s = 60
+# BROWSER-BYTES-3: analytics, ads, Gemini's decorative images and its feedback widget, never
+# what the answer needs. Its script bundles get a new address on every try, so none is cached.
+block_urls = [
+  "https://www.googletagmanager.com/*",
+  "https://www.googleadservices.com/*",
+  "https://*.doubleclick.net/*",
+  "https://www.google-analytics.com/*",
+  "https://analytics.google.com/*",
+  "https://www.gstatic.com/lamda/images/*",
+  "https://www.gstatic.com/feedback/*",
+]
 inputs = ["example question"]   # exactly one fixed question
 
 # The three minis, 6 networks each, as in the 24-hour run (BP-VERIFY-3). Logical names only.

@@ -38,7 +38,7 @@ MAX_PATTERNS = 200
 CACHE_TTL_S = 900
 CACHE_ENTRY_BYTES = 5_000_000
 CACHE_BYTES = 50_000_000
-FETCHES = 6
+FETCHES = 16
 MAX_AGE = re.compile(r"max-age=(\d+)")
 # Never kept: the body is already decoded, and its length is the fulfilled body's own.
 DROPPED = frozenset({"content-encoding", "content-length", "transfer-encoding", "set-cookie"})
@@ -62,6 +62,8 @@ class AssetCache:
     _entries: OrderedDict[str, Entry] = field(default_factory=OrderedDict)
     _size: int = 0
     fetches: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(FETCHES))
+    # The download in flight per URL: a second try asking for it waits for that one.
+    pending: dict[str, asyncio.Future] = field(default_factory=dict)
 
     def get(self, url: str) -> Entry | None:
         entry = self._entries.get(url)
@@ -179,10 +181,27 @@ def router(lean: Lean) -> Callable[[Any], Any]:
 
 
 async def _cached(route: Any, url: str, cache: AssetCache) -> None:
+    """A hit is served from memory; a file another try is downloading now is waited for (one
+    download per file, however many tries start at once); otherwise this try downloads it.
+    A download that failed or was not cacheable leaves each waiting try to download its own."""
     entry = cache.get(url)
+    if entry is None and url in cache.pending:
+        entry = await asyncio.shield(cache.pending[url])
     if entry is not None:
         await route.fulfill(status=entry.status, headers=entry.headers, body=entry.body)
         return
+    if url in cache.pending:  # a new download began after the one waited for failed
+        await _download(route, url, cache)
+        return
+    done = cache.pending[url] = asyncio.get_running_loop().create_future()
+    try:
+        await _download(route, url, cache)
+    finally:
+        del cache.pending[url]
+        done.set_result(cache.get(url))
+
+
+async def _download(route: Any, url: str, cache: AssetCache) -> None:
     try:
         async with cache.fetches:
             response = await route.fetch()

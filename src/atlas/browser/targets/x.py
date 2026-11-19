@@ -20,6 +20,8 @@ class XWeb(PageTarget):
 
     id: str = X_WEB
     url: str = "https://x.com/"
+    # 2: the try waits for READY (header and post together), not for either one.
+    version: str = "2"
 
     # X's logged-out profile page (2026-11): the name as the main column's h1, the latest posts
     # as articles, then a "See <name>'s full profile" sign-up box beside them that every
@@ -28,6 +30,8 @@ class XWeb(PageTarget):
     POSTS = ('article[data-testid="tweet"]', "main article")
     DIALOG = '[data-testid="sheetDialog"]'
     LOGIN_PATHS = ("/i/flow/login", "/i/jf/onboarding", "/login")
+    # The header shows before the posts: read the page once both are there, or the login sheet.
+    READY = (f"html:has({', '.join(HEADERS)}):has({', '.join(POSTS)})", DIALOG)
     SHOWN_UNREAD = ("text_head",)
 
     def address(self, value: Any) -> str:

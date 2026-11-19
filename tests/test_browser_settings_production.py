@@ -71,7 +71,8 @@ def test_the_template_loads_with_the_production_fields():
     early = {"google_search": "domcontentloaded", "ai_overview": "domcontentloaded"}
     assert waits == early and browser.wait_until == "load"
     blocks = {t.id: t.block_urls for t in settings.targets if t.block_urls is not None}
-    assert set(blocks) == {"ai_overview", "cloudflare_challenge"} and browser.block_urls == ()
+    blocked = {"ai_overview", "ai_chatgpt", "ai_gemini", "cloudflare_challenge"}
+    assert set(blocks) == blocked and browser.block_urls == ()
     # Never what the overview needs: Google's scripts, its app and its answers.
     needed = ("https://www.google.com/xjs/_/js/k=x", "https://www.gstatic.com/_/mss/x")
     assert not any(fnmatch.fnmatchcase(u, p) for u in needed for p in blocks["ai_overview"])
@@ -87,6 +88,31 @@ def test_the_template_loads_with_the_production_fields():
         for name, providers in HOSTS.items()
     }
     assert settings.untargeted == ("proxy-cheap/residential",)
+
+
+def test_chatgpt_caches_its_app_files_and_blocks_the_sign_in_prompt():
+    # BROWSER-BYTES-3: about 3.1 MB a try before, about 0.36 MB once the cache holds the files.
+    [chatgpt] = [t for t in load_settings(TEMPLATE).targets if t.id == "ai_chatgpt"]
+    assert chatgpt.block_resources == ("image", "media", "font")
+    assert chatgpt.block_urls == ("https://accounts.google.com/gsi/*",)
+    assert "https://chatgpt.com/unauth-mweb/assets/*" in chatgpt.cache_urls
+    # The page, its anti-bot script and the answer are never cached.
+    assert not any("sentinel" in url or "backend" in url for url in chatgpt.cache_urls)
+
+
+def test_gemini_blocks_only_what_its_answer_never_needs():
+    # BROWSER-BYTES-3: about 5.6 MB a try before, about 4.7 MB after, success unchanged.
+    [gemini] = [t for t in load_settings(TEMPLATE).targets if t.id == "ai_gemini"]
+    assert "https://www.googletagmanager.com/*" in gemini.block_urls
+    assert gemini.cache_urls is None
+    # The page, its scripts, its anti-bot checks and the answer stream are never blocked.
+    needed = (
+        "https://gemini.google.com/app",
+        "https://gemini.gstatic.com/_/mss/boq-bard-web/_/js/k=x",
+        "https://www.google.com/js/bg/x.js",
+        "https://gemini.google.com/_/BardChatUi/data/x/StreamGenerate",
+    )
+    assert not any(fnmatch.fnmatchcase(u, rule) for u in needed for rule in gemini.block_urls)
 
 
 def test_the_challenge_target_never_blocks_or_caches_the_challenge():
