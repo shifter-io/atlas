@@ -125,7 +125,7 @@ async def test_the_router_aborts_serves_from_cache_fetches_into_it_or_continues(
     kept = Route(Request("https://x.example/"))
     await handler(blocked)
     await handler(kept)
-    assert blocked.done == ("abort", "blockedbyclient") and kept.done == ("continue",)
+    assert blocked.done == ("abort", None) and kept.done == ("continue",)
     first, second = Route(Request(STATIC)), Route(Request(STATIC))
     await handler(first)
     await handler(second)

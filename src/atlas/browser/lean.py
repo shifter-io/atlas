@@ -128,7 +128,10 @@ def of(block: Lean | Collection[str]) -> Lean:
 
 
 def _top_document(request: Any) -> bool:
-    return request.is_navigation_request() and request.frame.parent_frame is None
+    # The frame is read only for a document: a service worker's request has none.
+    if request.resource_type != "document" or not request.is_navigation_request():
+        return False
+    return request.frame.parent_frame is None
 
 
 def _matches(url: str, patterns: tuple[str, ...]) -> bool:
@@ -141,7 +144,7 @@ def router(lean: Lean, cache: AssetCache = SHARED) -> Callable[[Any], Any]:
     async def route(route: Any) -> None:
         request = route.request
         if lean.blocked(request):
-            await route.abort("blockedbyclient")
+            await route.abort()
         elif lean.cacheable(request):
             await _cached(route, request.url, cache)
         else:
