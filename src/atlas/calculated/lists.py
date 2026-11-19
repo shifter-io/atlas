@@ -69,12 +69,13 @@ def signatures(conn, payload, runs, buckets):
     """List signature v1 of every daily group's window: {(product_id, cohort, hours): sha256}.
 
     runs and buckets are the calculation's, after build() gave each run its group and light (its
-    histograms count for the breakdowns' latency). The signature is the digest of the
-    implementation, methodology, window hours, country names and, sorted by run_key, each run of
-    the group with buckets in the window: run_key, summary_sha256, enrichment release_id and
-    artifact_sha256 (None when unenriched), its first and last bucket in the window and light,
-    and the patches its summary names (patches(): its geo artifact, its latency model). A run
-    marked "reach" (verdicts.REACH) is in the 24h window from its first bucket.
+    histograms count for the breakdowns' latency). The signature is the digest of the list id
+    (payload's "lists_id": calculator.LISTS_ID), methodology, window hours, country names and,
+    sorted by run_key, each run of the group with buckets in the window: run_key,
+    summary_sha256, enrichment release_id and artifact_sha256 (None when unenriched), its first
+    and last bucket in the window and light, and the patches its summary names (patches(): its
+    geo artifact, its latency model). A run marked "reach" (verdicts.REACH) is in the 24h window
+    from its first bucket.
     Census-pulse (batch) groups are left out: their lists keep signature NULL.
     """
     cur = conn.cursor(row_factory=tuple_row)
@@ -92,7 +93,7 @@ def signatures(conn, payload, runs, buckets):
                 spans[r["group"], hours].setdefault(r["run_key"], [at, at])[1] = at
     signed_runs = sorted({k for runs_of in spans.values() for k in runs_of})  # only these
     enriched = {k: (rel, sha) for k, rel, sha in cur.execute(ENRICHMENTS, (signed_runs,))}
-    head = {"v": SIGNATURE_VERSION, "impl": payload["implementation_id"], "countries": countries}
+    head = {"v": SIGNATURE_VERSION, "impl": payload["lists_id"], "countries": countries}
     head["method"] = payload["methodology"]["id"]
     signed = {}
     for group in {r["group"] for r in daily.values()}:
