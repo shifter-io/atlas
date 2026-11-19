@@ -31,7 +31,7 @@ from datetime import timedelta
 from functools import partial
 from types import SimpleNamespace
 
-from psycopg.rows import dict_row
+from psycopg.rows import dict_row, tuple_row
 
 from .. import verdicts
 from ..estimates import window as estimates
@@ -70,7 +70,8 @@ MODES = ("full", "incremental", "recount")
 # is read (counted_only()).
 RUNS = (
     f"{verdicts.WITH_DAYS}SELECT r.run_key,r.run_id::text,r.summary_sha256,{{summary}} AS summary,"
-    "r.started_at,r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"
+    "r.started_at,r.finished_at,NULL::jsonb AS scope,s.scope_id,p.product_id,p.provider,p.name,"
+    "r.batch_id,"
     "b.kind AS test,b.scheduled_for AS slot_at,trim(b.country_code) AS batch_country,"
     "rr.slug AS batch_region,coalesce(cr.role,CASE b.kind {roles} END,'exploratory') AS role,"
     "cv.day IS NOT NULL AS counted "
@@ -81,6 +82,10 @@ RUNS = (
     "LEFT JOIN calculation_roles cr USING(run_key) "
     f"{verdicts.counted('s.product_id', COUNTRY, 'r.started_at')}"
     "{where}ORDER BY p.product_id,r.run_key"  # a network's runs allocated together: _interned()
+)
+# The runs' scopes, each read once (_interned()), in their products' order.
+SCOPES = (
+    "SELECT scope_id,scope FROM scope_details WHERE scope_id=ANY(%s) ORDER BY product_id,scope_id"
 )
 # The incremental calculation's runs (see above).
 WINDOW_RUNS = (
@@ -197,7 +202,8 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
     counting = verdicts.bounds(margin, as_of, rule)
     if mode == "full":
         query = RUNS.format(summary="r.summary", roles=roles, where="")
-        runs = _reached(conn, _ruled(_interned(conn.execute(query, counting)), rule), as_of, rule)
+        runs = _ruled(_interned(conn, conn.execute(query, counting)), rule)
+        runs = _reached(conn, runs, as_of, rule)
         buckets = _compacted(conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)))
         buckets = browser.horizon(config, runs, counted_only(runs, buckets), start)
         # The releases of the observations kept: the counted runs' (as incremental's OBSERVED).
@@ -210,7 +216,8 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         bounds = {"start": start, "end": as_of, "margin": margin} | counting
         summary = "CASE WHEN r.batch_id IS NULL THEN r.summary END"
         query = RUNS.format(summary=summary, roles=roles, where=WINDOW_RUNS)
-        runs = _reached(conn, _ruled(_interned(conn.execute(query, bounds)), rule), as_of, rule)
+        runs = _ruled(_interned(conn, conn.execute(query, bounds)), rule)
+        runs = _reached(conn, runs, as_of, rule)
         buckets = counted_only(runs, _buckets(conn, start, as_of))
         buckets = browser.horizon(config, runs, buckets, start)
         active = sorted({b["run_key"] for b in buckets})
@@ -271,16 +278,18 @@ def reached(runs):
     return frozenset(r["run_key"] for r in runs if r.get("reach"))
 
 
-def _interned(rows):
-    """Run rows read one by one, the runs of a scope sharing one scope dict (a pulse scope has
-    thousands of runs a month, and its JSON read with each took ~4 KB a run), in run key order.
-    RUNS reads them network by network, so a network's runs share their memory pages with no
-    other network's: a worker (parallel_measure.py) copies the pages of its networks only
-    (CALC-SCALE-1)."""
-    scopes, found = {}, []
-    for r in rows:
-        r["scope"] = scopes.setdefault(r["scope_id"], r["scope"])
-        found.append(r)
+def _interned(conn, rows):
+    """Run rows, the runs of a scope sharing one scope dict, in run key order. RUNS reads no
+    scope (CALC-PERF-3): a pulse scope has thousands of runs a month, and the view made its JSON,
+    ~4 KB, for each of them, every hour; SCOPES reads each scope once. RUNS reads the runs network
+    by network and SCOPES the scopes product by product, so a network's runs share their memory
+    pages with few other networks': a worker (parallel_measure.py) copies the pages of its
+    networks (CALC-SCALE-1)."""
+    found = list(rows)
+    ids = sorted({r["scope_id"] for r in found})
+    scopes = dict(conn.cursor(row_factory=tuple_row).execute(SCOPES, (ids,)))
+    for r in found:
+        r["scope"] = scopes[r["scope_id"]]
     found.sort(key=lambda r: r["run_key"])
     return found
 
