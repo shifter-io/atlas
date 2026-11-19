@@ -45,7 +45,9 @@ def test_a_day_is_scored_as_a_one_day_window():
         assert net["days"][0]["success_overall"] == {
             k: v for k, v in overall.items() if k != "weights"
         }
-        assert overall["status"] == ts.PARTIAL_TARGETS and set(overall["targets"]) == {"generic_http"}
+        assert overall["status"] == ts.PARTIAL_TARGETS and set(overall["targets"]) == {
+            "generic_http"
+        }
         # The third day has no try: a null score with its reason.
         none = net["days"][2]["success_overall"]
         assert none["score"] is None and none["status"] == ts.NO_RANKED_TARGETS

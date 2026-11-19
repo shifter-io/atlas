@@ -1,7 +1,7 @@
 """SUCCESS-ALL-8-1 (the owner's decision of 2026-11-19, corrected to equal weights): a network
 window's success_overall is the plain mean of its 8 card targets' distance scores, each 12.5%,
-shifted so the best network of the kind reads 10 (target_scores.success_overall(); the methodology's [success_score]).
-Which tries a window counts: tests/test_card_success.py."""
+shifted so the best network of the kind reads 10 (target_scores.success_overall(); the
+methodology's [success_score]). Which tries a window counts: tests/test_card_success.py."""
 
 from pathlib import Path
 
@@ -54,7 +54,7 @@ def test_each_target_scores_its_distance_and_the_score_is_their_plain_mean():
     everywhere else (a 7). Raw: a (7 x 10 + 5) / 8 = 9.375, b (7 x 7 + 10) / 8 = 7.375; shifted
     by +0.625 so a reads 10: b 8.0."""
     a, b = overall(window(95.0, google_search=40.0), window(92.0, google_search=45.0))
-    assert a["targets"] == {t: 5.0 if t == "google_search" else 10.0 for t in CARDS}
+    assert a["targets"] == pytest.approx({t: 5.0 if t == "google_search" else 10.0 for t in CARDS})
     assert b["targets"]["google_search"] == 10 and b["targets"]["generic_http"] == pytest.approx(7)
     assert a["weights"] == b["weights"] == dict.fromkeys(CARDS, 1)
     assert a["score"] == 10 and b["score"] == pytest.approx(8.0)
@@ -78,10 +78,15 @@ def test_a_target_without_a_try_is_left_out_and_named():
     full, partial = overall(window(90.0), window(90.0, linkedin_public=None, ai_answers=None))
     assert partial["status"] == ts.PARTIAL_TARGETS
     assert partial["missing_targets"] == ["linkedin_public", "ai_answers"]
-    assert set(partial["targets"]) == set(partial["weights"]) == set(CARDS) - {
-        "linkedin_public",
-        "ai_answers",
-    }
+    assert (
+        set(partial["targets"])
+        == set(partial["weights"])
+        == set(CARDS)
+        - {
+            "linkedin_public",
+            "ai_answers",
+        }
+    )
     # The weights renormalised over the 6 targets it has: all at the best, it reads 10 too.
     assert partial["score"] == full["score"] == 10
     assert (partial["rank"], partial["ranked_of"]) == (1.5, 2)
@@ -100,16 +105,20 @@ def test_a_target_with_tries_and_no_success_counts_as_zero():
 
 def test_no_try_on_any_target_has_no_score():
     found = overall(window(90.0), window(80.0), {"targets": {}, "_success": {}}, {"targets": {}})
-    assert found[2] == found[3] == {
-        "score": None,
-        "rank": None,
-        "ranked_of": None,
-        "status": ts.NO_RANKED_TARGETS,
-        "targets": {},
-        "weights": {},
-        "missing_targets": CARDS,
-        "basis": "card_targets",
-    }
+    assert (
+        found[2]
+        == found[3]
+        == {
+            "score": None,
+            "rank": None,
+            "ranked_of": None,
+            "status": ts.NO_RANKED_TARGETS,
+            "targets": {},
+            "weights": {},
+            "missing_targets": CARDS,
+            "basis": "card_targets",
+        }
+    )
     assert [o["ranked_of"] for o in found] == [2, 2, None, None]
 
 

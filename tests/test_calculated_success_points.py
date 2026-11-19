@@ -1,7 +1,8 @@
 """SUCCESS-POINTS-1 (#1301, the owner, 2026-11-17): each network series point's success_score is
 the window's Success x/10 rule (target_scores.success_overall()) over the point's card target
-counts ("_success", SUCCESS-ALL-8-1), the best network the kind's best over the same counts. Which rows a point counts (its
-trailing window, SUCCESS-TRAILING-1) is test_calculated_success_trailing.py's."""
+counts ("_success", SUCCESS-ALL-8-1), the best network the kind's best over the same counts.
+Which rows a point counts (its trailing window, SUCCESS-TRAILING-1) is
+test_calculated_success_trailing.py's."""
 
 from datetime import UTC, datetime
 from pathlib import Path

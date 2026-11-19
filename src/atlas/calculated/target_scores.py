@@ -99,6 +99,7 @@ import math
 from collections import defaultdict
 from datetime import datetime
 
+from .card_success import weights as card_weights
 from .policy import (
     HTTP_DIFFICULTY,
     browser_difficulty,
@@ -106,7 +107,6 @@ from .policy import (
     http_difficulty,
     success_score,
 )
-from .card_success import weights as card_weights
 
 # A network is ranked for an HTTP target only with this many completed tries in the window (the
 # standard error of a rate near 50% is 5 points at 100 tries, 7 at 50); for a browser target the
