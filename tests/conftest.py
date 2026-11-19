@@ -52,6 +52,7 @@ from pathlib import Path
 import helpers
 import pytest
 
+from atlas.browser import asset_cache
 from atlas.providers.credentials import read_credentials
 
 # Shared test modules whose assertions report like the tests' own (pytest's introspection).
@@ -153,6 +154,14 @@ def sigterm_restored():
     yield
     if handler is not None:  # None: not set from Python
         signal.signal(signal.SIGTERM, handler)
+
+
+@pytest.fixture(autouse=True)
+def asset_cache_reset():
+    """The browser hosts' warm asset cache back to memory only after the test: a test that
+    builds a BrowserHost points it at that test's state directory (asset_cache.configure)."""
+    yield
+    asset_cache.configure(None, asset_cache.DEFAULT_AGE_S / 3600)
 
 
 @pytest.fixture(autouse=True)

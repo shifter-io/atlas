@@ -79,6 +79,7 @@ browser_seconds = 2520
 # them, so only stylesheets are blocked (the rules read selectors, never styled text).
 wait_until = "domcontentloaded"
 block_resources = ["image", "media", "font", "stylesheet"]
+cache_urls = ["https://static.cdninstagram.com/*"]   # its app scripts, kept warm (asset_cache.py)
 inputs = [{site = "instagram", handle = "example"}]
 
 [[target]]
@@ -89,6 +90,7 @@ engine = "chrome"               # Instagram's engine, so social_web is one score
 browser_seconds = 740
 wait_until = "domcontentloaded"   # BROWSER-BYTES-2: as instagram_web
 block_resources = ["image", "media", "font", "stylesheet"]
+cache_urls = ["https://abs.twimg.com/*"]   # its app scripts, kept warm (asset_cache.py)
 inputs = ["example"]            # X handles
 
 [[target]]

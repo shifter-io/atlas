@@ -138,7 +138,9 @@ class AssetCache:
             if meta["url"] != url:
                 return None
             body = body_path.read_bytes()
-            return Entry(int(meta["status"]), dict(meta["headers"]), body, float(meta["expires"]))
+            # A lower cache_hours applies at once to files kept under a higher one.
+            expires = min(float(meta["expires"]), body_path.stat().st_mtime + self.max_age_s)
+            return Entry(int(meta["status"]), dict(meta["headers"]), body, expires)
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
