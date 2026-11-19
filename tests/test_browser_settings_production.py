@@ -72,7 +72,8 @@ def test_the_template_loads_with_the_production_fields():
     early = dict.fromkeys(("google_search", "ai_overview", "linkedin_public"), "domcontentloaded")
     assert waits == early and browser.wait_until == "load"
     blocks = {t.id: t.block_urls for t in settings.targets if t.block_urls is not None}
-    assert set(blocks) == {"ai_overview", "ai_chatgpt", "ai_gemini"} and browser.block_urls == ()
+    blocked = {"ai_overview", "ai_chatgpt", "ai_gemini", "cloudflare_challenge"}
+    assert set(blocks) == blocked and browser.block_urls == ()
     # Never what the overview needs: Google's scripts, its app and its answers.
     needed = ("https://www.google.com/xjs/_/js/k=x", "https://www.gstatic.com/_/mss/x")
     assert not any(fnmatch.fnmatchcase(u, p) for u in needed for p in blocks["ai_overview"])
@@ -124,6 +125,21 @@ def test_linkedin_reads_the_server_html_without_scripts_and_caches_its_styleshee
     # Only the content-hashed static files: never a profile, the authwall or an API.
     pages = ("https://www.linkedin.com/in/x/", "https://www.linkedin.com/authwall")
     assert not any(fnmatch.fnmatchcase(u, p) for u in pages for p in linkedin.cache_urls)
+
+
+def test_the_challenge_target_never_blocks_or_caches_the_challenge():
+    # BROWSER-BYTES-3: about 1.76 MB a try before, about 1.16 MB with these blocks and the
+    # private file's cache rules, results unchanged.
+    [cf] = [t for t in load_settings(TEMPLATE).targets if t.id == "cloudflare_challenge"]
+    challenge = (
+        "https://challenges.cloudflare.com/turnstile/v0/api.js",
+        "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/orchestrate/x",
+        "https://www.upwork.com/cdn-cgi/challenge-platform/scripts/jsd/main.js",
+        "https://www.glassdoor.com/cdn-cgi/challenge-platform/h/g/scripts/x.js",
+        "https://www.scrapingcourse.com/cdn-cgi/challenge-platform/h/b/orchestrate/x.js",
+    )
+    assert cf.cache_urls is None  # the input sites' paths live only in the private file
+    assert not any(fnmatch.fnmatchcase(u, rule) for u in challenge for rule in cf.block_urls)
 
 
 def test_instagram_and_x_run_on_one_engine_so_social_web_is_one_score():
