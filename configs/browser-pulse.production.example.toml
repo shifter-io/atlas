@@ -111,6 +111,8 @@ block_urls = [
   "*://www.google.com/maps/vt*",
   "*://www.google.com/complete/*",
 ]
+# Google's scripts and the overview's app, kept for later tries (public files only, asset_cache.py).
+cache_urls = ["https://www.google.com/xjs/*", "https://www.gstatic.com/_/mss/*"]
 inputs = ["example question"]
 
 [[target]]

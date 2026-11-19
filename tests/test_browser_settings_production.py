@@ -76,6 +76,9 @@ def test_the_template_loads_with_the_production_fields():
     # Never what the overview needs: Google's scripts, its app and its answers.
     needed = ("https://www.google.com/xjs/_/js/k=x", "https://www.gstatic.com/_/mss/x")
     assert not any(fnmatch.fnmatchcase(u, p) for u in needed for p in blocks["ai_overview"])
+    # Its scripts and app are kept warm instead (public files only, asset_cache.py).
+    overview = next(t for t in settings.targets if t.id == "ai_overview")
+    assert all(any(fnmatch.fnmatchcase(u, p) for p in overview.cache_urls) for u in needed)
     assert settings.chrome.executable == DEFAULT_EXECUTABLE
     assert {t.id: (t.tries, t.every_minutes) for t in settings.targets} == {
         target: (100, 1320) for target in ENGINES
