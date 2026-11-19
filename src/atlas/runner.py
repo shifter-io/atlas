@@ -18,6 +18,7 @@ from typing import Any, Protocol
 from . import __version__
 from .answers import Answers
 from .models import Outcome, RequestContext, RunConfig, RunSummary, protocol_of
+from .node_dns import DnsFailures
 from .process_transport import ProcessTransport, process_count
 from .sinks import JsonSink, ResultSink
 from .slices import Slices
@@ -89,6 +90,8 @@ class RunOptions:
     deadline: float | None = None
     aggregate_ips: bool = True
     wall_clock: Callable[[], float] | None = None
+    # The attempt this run replaces (node_dns.attempt), kept as the summary's dns_retry.
+    dns_retry: dict[str, Any] | None = None
     slices: bool = False
 
 
@@ -119,6 +122,7 @@ async def run(
         observation_consumer=options.observation_consumer,
         aggregate_ips=options.aggregate_ips,
         parallel=transport_factory is HttpTransport and process_count(config) > 1,
+        dns_retry=options.dns_retry,
         slices=Slices() if options.slices else None,
     )
     state.sink.start(state.run_id)
@@ -192,6 +196,8 @@ class _RunState:
     observation_consumer: Callable[[str, float], Awaitable[None]] | None
     aggregate_ips: bool
     parallel: bool
+    dns_retry: dict[str, Any] | None = None
+    dns: DnsFailures = field(default_factory=DnsFailures)
     run_id: str = field(init=False)
     began_wall: float = field(init=False)
     began: float = field(init=False)
@@ -407,6 +413,7 @@ def _record(state: _RunState, result: Outcome, completed_at: float, observed: fl
     elapsed = time.perf_counter() - state.began
     bucket = bucket_of(state.began_wall + elapsed)
     state.totals.add(result)
+    state.dns.add(result.detail)
     if state.slices is not None:
         state.slices.add(elapsed, result)
     kind = state.answers.add(result, completed_at)
@@ -639,6 +646,8 @@ def _summary(state: _RunState, status: str, stop_reason: str, elapsed: float) ->
         if stop_reason == "stalled" and last_success_wall is not None
         else None,
         redirects=totals.redirects if state.protocol == "mixed" else None,
+        dns_failures=state.dns.report(),
+        dns_retry=state.dns_retry,
         slices=state.slices.export() if state.slices is not None else None,
     )
     release = getattr(enricher, "release", None)

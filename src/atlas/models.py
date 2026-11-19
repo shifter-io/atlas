@@ -314,6 +314,8 @@ class Outcome:
     # A 'mixed' network answered HTTP with a redirect that was followed over HTTPS;
     # latency, bytes and body then cover both legs and status is the HTTPS answer.
     redirected: bool = False
+    # The exact text of a 'dns' error (node_dns.detail); None for every other outcome.
+    detail: str | None = None
 
     def __post_init__(self) -> None:
         verdict = from_error(self.error) if self.verdict is None else self.verdict
@@ -375,6 +377,10 @@ class RunSummary:
     # Mean success latency (Histogram.mean); None with no successes. Summaries written
     # before this field existed lack it: readers treat a missing key as unknown.
     latency_mean_ms: float | None = None
+    # The node's own DNS failures (node_dns): their texts and its resolver; omitted without any.
+    dns_failures: dict[str, Any] | None = None
+    # The attempt a node's own DNS failures ended, which this run replaced (node_dns.attempt).
+    dns_retry: dict[str, Any] | None = None
     # Tries, successes and error classes per 5 seconds (slices.py, RunOptions.slices); omitted
     # when not kept, and absent from summaries written before it existed.
     slices: dict[str, Any] | None = None
@@ -390,6 +396,8 @@ class RunSummary:
             "rate_limited",
             "no_inventory",
             "other_country",
+            "dns_failures",
+            "dns_retry",
             "slices",
         ):
             if summary[key] is None:
