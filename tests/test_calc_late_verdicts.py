@@ -2,6 +2,10 @@
 hour's daily tests are) keeps the `*` IP memos and the IP state unless a run folded then stops
 counting (fleet_verdicts.ruled()); the incremental build equals the full one either way. Before,
 every such verdict emptied them, so every hourly build folded the whole window again.
+
+CALC-PERF-1: when a run folded then stops counting, the latest build takes back only what it
+added (fleet_verdicts.unfold()): it folds only that run's buckets again and moves the vectors,
+and its memos and IP state equal those of a build that emptied them and counted everything again.
 """
 
 import re
@@ -14,18 +18,39 @@ from test_calculated_incremental import assert_equal, history
 
 from atlas.calculated import fleet_verdicts
 from atlas.calculated import target_scores as ts
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 pytestmark = pytest.mark.country_verdicts
 
 T = datetime(2026, 11, 16, 12, tzinfo=UTC)
 NEW = 10**9  # run keys of verdicts imported after a fold: newer than every run
+# The IP memos and the IP state, as the next build reads them (vectors of 0 IPs are tidied).
+MEMOS = (
+    "SELECT bucket_start,runs_digest,unique_ips,scopes_digest FROM calculated_bucket_ips",
+    "SELECT ip_id,last_seen FROM calculated_ip_last_seen",
+    "SELECT ip_id,scope,last_seen FROM calculated_scope_ip_last_seen",
+    "SELECT window_hours,scopes,ips FROM calculated_ip_vectors WHERE ips<>0",
+    "SELECT as_of,windows,unbatched FROM calculated_ip_vector_state",
+)
 
 
 def ip_state(err):
     """(buckets, moved) of the last ip_state timing line in err."""
     found = re.findall(r"timing: calculate ip_state \S+ s buckets=(\d+) moved=(\d)", err)
     return tuple(map(int, found[-1]))
+
+
+def memos(database):
+    with connect(database) as conn:
+        return [sorted(conn.execute(query).fetchall()) for query in MEMOS]
+
+
+def unfolded(err):
+    """(stopped runs, touched pairs) of the ip_unfold timing lines in err."""
+    found = re.findall(r"timing: calculate ip_unfold \S+ s stopped=(\d+) pairs=(\d+)", err)
+    return [tuple(map(int, f)) for f in found]
 
 
 def counted(runs, rule=10):
@@ -56,6 +81,10 @@ def test_only_a_folded_run_that_stopped_counting_empties_the_memos():
     # A late verdict older than the recorded day, or a fold that recorded nothing: emptied.
     assert same.stopped(state, T - 2 * fleet_verdicts.RECORDED, until)
     assert same.stopped({"on": True, "through": 0}, late, until)
+    # Which runs stopped: run 2, none, or not known (any may have).
+    assert stopped.stopped_runs(state, late, until) == [2]
+    assert same.stopped_runs(state, late, until) == []
+    assert same.stopped_runs(state, T - 2 * fleet_verdicts.RECORDED, until) is None
 
 
 @pytest.mark.asyncio
@@ -87,7 +116,30 @@ async def test_late_verdicts_keep_the_ip_memos_unless_a_folded_run_stops_countin
     assert moved == 1 and 0 < buckets < 12
     assert completed(payload, "beta", "US", "24h") == 40
     # alpha DE does not count from 4 hours back (3 IPs): its daily test 3 hours back, folded
-    # when it counted, stops counting, so the memos are emptied and counted again.
+    # when it counted, stops counting: only what it added is taken back and the vectors moved
+    # (before CALC-PERF-1 the memos were emptied). Its buckets had no other run: none to fold.
     verdict(database, "alpha", "DE", end - 4 * HOUR, 3, NEW + 3)
     assert_equal(database, policy, end)
+    assert_unfolded(database, policy, end, capsys, 1)
+    # alpha US does not count from 22.5 hours back (3 IPs) until 5 hours back: its daily test
+    # of 22 hours back stops; the one of 23.5 hours back, in the same 24-hour slice, still counts.
+    verdict(database, "alpha", "US", end - 22 * HOUR - HOUR / 2, 3, NEW + 4)
+    assert_equal(database, policy, end)
+    assert_unfolded(database, policy, end, capsys, 1)
+
+
+def assert_unfolded(database, policy, end, capsys, runs):
+    """The build at end took back only what `runs` stopped runs added (fleet_verdicts.unfold()),
+    and left the memos and IP state as a build that empties them and counts everything again
+    does (a recount: the hourly build of the same inputs is not reused)."""
+    err = capsys.readouterr().err
+    assert ip_state(err)[1] == 1
+    [(stopped, pairs)] = unfolded(err)
+    assert stopped == runs and pairs > 0
+    kept = memos(database)
+    with connect(database) as conn:
+        for statement in fleet_verdicts.EMPTY:
+            conn.execute(statement)
+    calculate(database, policy, as_of=end, mode="recount")
     assert ip_state(capsys.readouterr().err)[1] == 0
+    assert memos(database) == kept
