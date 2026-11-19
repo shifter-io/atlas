@@ -169,7 +169,8 @@ def test_registered_targets_match_the_targets_file():
 
 def test_other_targets_only_read_the_page():
     driver = FakeDriver(0)
-    for target_id in (c.AMAZON_PDP, c.GOOGLE_SEARCH, c.LINKEDIN_PUBLIC, c.INSTAGRAM_WEB):
+    # google_search reads too, waiting only for a page read early (its own test).
+    for target_id in (c.AMAZON_PDP, c.LINKEDIN_PUBLIC, c.INSTAGRAM_WEB):
         target = registry.get(target_id)
         spec = target.page(context(0), (INPUTS.get(target_id, {"site": "x", "handle": "a"}),))
         assert asyncio.run(target.interact(driver, spec)) is None
