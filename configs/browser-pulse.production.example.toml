@@ -140,6 +140,17 @@ engine = "chrome"
 browser_seconds = 1360
 timeout_s = 60
 answer_wait_s = 60
+# BROWSER-BYTES-3: analytics, ads, Gemini's decorative images and its feedback widget, never
+# what the answer needs. Its script bundles get a new address on every try, so none is cached.
+block_urls = [
+  "https://www.googletagmanager.com/*",
+  "https://www.googleadservices.com/*",
+  "https://*.doubleclick.net/*",
+  "https://www.google-analytics.com/*",
+  "https://analytics.google.com/*",
+  "https://www.gstatic.com/lamda/images/*",
+  "https://www.gstatic.com/feedback/*",
+]
 inputs = ["example question"]   # exactly one fixed question
 
 # The three minis, 6 networks each, as in the 24-hour run (BP-VERIFY-3). Logical names only.
