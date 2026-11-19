@@ -54,6 +54,12 @@ LATENCY_TARGET = "generic_http"
 # pulses, latency_ms; the owner's decision of 2026-11-16, SPEED-PULSE-1) or "under_load" (its
 # daily tests, census and load runs, latency_under_load_ms; the rule before it).
 SPEED_LATENCIES = {"light_load": "latency_ms", "under_load": "latency_under_load_ms"}
+# [latency] (LATENCY-BASKET-1, calculated/latency_basket.py): the network headline latency over a
+# fixed basket of countries, each weighing the same: their aggregate, and the value of a basket
+# country a network has no latency in.
+LATENCY_BASKET = {"basket", "aggregate", "penalty"}
+LATENCY_AGGREGATES = ("mean", "median")
+LATENCY_PENALTIES = ("slowest_network",)
 # Live tape detection thresholds ([events] in the methodology file). They never change a
 # calculation, so load() keeps them out of the methodology id; detect.py reads them via events().
 EVENTS = {
@@ -151,6 +157,7 @@ KNOWN = {
     "success_score",
     "value",
     "speed_latency",
+    "latency",
 }
 
 
@@ -209,6 +216,7 @@ def validate(config):
     if latency_target(config) not in config["required_targets"]:
         raise ValueError("The latency target must be a required target")
     speed_latency(config)
+    latency_basket(config)
     return config
 
 
@@ -287,6 +295,29 @@ def speed_latency(config):
     if not isinstance(basis, str) or basis not in SPEED_LATENCIES:
         raise ValueError("Invalid speed latency")
     return basis
+
+
+def latency_basket(config):
+    """The validated [latency] table ({"basket": upper-case country codes, "aggregate",
+    "penalty"}), None without one: the pooled latency of every country a network is tested in."""
+    found = config.get("latency")
+    if found is None:
+        return None
+    if not isinstance(found, dict) or set(found) != LATENCY_BASKET:
+        raise ValueError("Invalid latency settings")
+    basket = found["basket"]
+    codes = isinstance(basket, list) and all(
+        isinstance(c, str) and len(c) == 2 and c.isalpha() and c.isupper() for c in basket
+    )
+    if (
+        not codes
+        or not basket
+        or len(set(basket)) != len(basket)
+        or found["aggregate"] not in LATENCY_AGGREGATES
+        or found["penalty"] not in LATENCY_PENALTIES
+    ):
+        raise ValueError("Invalid latency settings")
+    return found
 
 
 def _groups(config):

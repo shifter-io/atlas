@@ -64,6 +64,10 @@ type Metrics struct {
 	RequestSuccessRate Num        `json:"request_success_rate"`
 	LatencyUnderLoadMs *Latency   `json:"latency_under_load_ms"`
 	UnderLoad          *UnderLoad `json:"under_load"`
+	// LatencyBasket is the headline latency's country basket on a network's
+	// latency target (LATENCY-BASKET-1): its size and the countries with a
+	// latency of the network's own; nil in a snapshot calculated without one.
+	LatencyBasket *LatencyBasket `json:"latency_basket"`
 	// TimeSlots is present exactly in every-request snapshots (see EveryRequest).
 	TimeSlots *TimeSlots `json:"time_slots"`
 }
@@ -80,6 +84,16 @@ type UnderLoad struct {
 
 func (v *UnderLoad) UnmarshalJSON(d []byte) error {
 	type plain UnderLoad
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+type LatencyBasket struct {
+	Size    Num `json:"size"`
+	Covered Num `json:"covered"`
+}
+
+func (v *LatencyBasket) UnmarshalJSON(d []byte) error {
+	type plain LatencyBasket
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 

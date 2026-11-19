@@ -629,7 +629,8 @@ The generated English copy (tagline, verdict, strengths, weaknesses, the product
 
 `windowStats` (`/v1/rankings` rows, `/v1/networks/{slug}` `stats` and its
 `/chart` answers) reads the snapshot window: `latencyP50/P90/P99` the `generic_http` target's headline latency, its
-`latency_ms` (normal requests, the pulses', concurrency 25; HEADLINE-PULSE-1),
+`latency_ms` (normal requests, the pulses', concurrency 25; HEADLINE-PULSE-1; a network's over
+its country basket since LATENCY-BASKET-1, `latencyBasketCovered` below),
 `lightLatencyP50/P90/P99` the same `latency_ms`, always equal to the headline (kept so
 that no client breaks; null where the headline is),
 `latencyTarget` `"generic_http"`,
@@ -657,6 +658,7 @@ network without a snapshot product, and wherever the window has no value):
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
 | `exclusiveIps`, `exclusiveScore` | the range's `/v1/overlap?kind=<the window's kind>` row of the network: its exclusive IPs (`poolIps × exclusiveShare`, rounded, `poolIps` the range's `uniqueIps`; #1283) and their 1-10 score ("Exclusive score" below); null where that row has none, and without a snapshot product |
 | `observedDays` | days from the range's first history point (the merged history behind `successScoreDelta`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
+| `latencyBasketCovered`, `latencyBasketSize` *(added, LATENCY-BASKET-1)* | the headline latency's country basket (the owner's decision of 2026-11-19, #1385; the methodology's `[latency]`): `latencyBasketSize` its countries (38), `latencyBasketCovered` how many of them have a latency of the network's own in the range (`generic_http`'s `latency_ms.latency_basket` `size` and `covered`), for "N of 38 countries" beside the latency. `latencyP50/P90/P99`, `latencyMean`, `lightLatencyP50/P90/P99`, the `latency` series, every `latencySpark` and Speed (`breakdown.speed`, so the score) are the plain mean over the basket countries of the network's latency in each, a country it lacks counting as the slowest network of its kind there ("Network headline latency over a country basket" on the methodology page). Also on `/v1/rankings` and `/v1/home` `networks[]`. Null without a snapshot product and in a snapshot calculated without the basket (`insufficient_data`) |
 | `latencyUnderLoad` | whether `latencyP50` is under load: false whenever there is a latency, since the headline is the latency of normal requests (`latency_ms`, the pulses'; HEADLINE-PULSE-1: it was true with a daily test, census or load run of `generic_http` in the window); null without latency |
 | `underLoadLatencyP50`, `underLoadLatencyP90`, `underLoadLatencyP99` *(added, HEADLINE-PULSE-1)* | `generic_http`'s latency under load, `latency_under_load_ms` (the daily country tests, concurrency 2000, 500 for two networks, census and load runs): display only, no score, rank, delta or spark reads it. Null in a window without one (every-request snapshots only) with `insufficient_data`. `/v1/home` `networks[]` carries `underLoadLatencyP50` too |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded. Since VALUE-ALL-RANK-1 the calculation publishes it with the range's value component and the API serves that figure (`/v1/home` `insights.valueAll` the same); a lower bound when a card target has no success (`costIsLowerBound`). Null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost for another reason: no run or no wire bytes; in a build from before VALUE-ALL-RANK-1, also no success) |
@@ -1433,6 +1435,9 @@ fifth with the opening fifth of observed samples in the selected window. Finer
 Success is a percentage-point difference. Two observations are required.
 
 `latencyDeltaPct` (LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1) compares whole days
+(since LATENCY-BASKET-1 it compares the network's pooled pulse latency, not the basket
+`latencyP50`: its own change, with no penalty, both periods by the same rule; a basket-based
+change is a follow-up)
 instead: every country has one daily test a day at its own hour, so only a whole day holds
 every country. It is the headline latency p50 (the pulses' latency of normal requests, the
 countries counted those the pulses tested; HEADLINE-PULSE-1; the latency under load never

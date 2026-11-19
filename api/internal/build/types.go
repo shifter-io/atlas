@@ -59,8 +59,13 @@ type WindowStats struct {
 	// LatencyTarget names the target the latency fields are for (measured
 	// networks: generic_http, the only target with a latency, see
 	// latencyMetrics); null without a snapshot product.
-	LatencyTarget   *string `json:"latencyTarget"`
-	LatencyDeltaPct Num     `json:"latencyDeltaPct"`
+	LatencyTarget *string `json:"latencyTarget"`
+	// LatencyBasketCovered of LatencyBasketSize: the basket countries the
+	// headline latency has a latency of the network's own in (LATENCY-BASKET-1,
+	// "N of 38 countries"); null without the basket (latencyBasket).
+	LatencyBasketCovered Num `json:"latencyBasketCovered"`
+	LatencyBasketSize    Num `json:"latencyBasketSize"`
+	LatencyDeltaPct      Num `json:"latencyDeltaPct"`
 	// LatencyDeltaBasis is the periods LatencyDeltaPct compares: day, week or
 	// month (LATENCY-DELTA-FALLBACK-1); null when it is null or not the day
 	// rule's.

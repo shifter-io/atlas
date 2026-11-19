@@ -108,6 +108,31 @@ country_min_ips = 1
 [slots]
 min_latency_successes = 30
 
+# The network headline latency (latencyP50/P90/P99 and the mean, each series point's latency) and
+# the Speed component that reads its p50 (LATENCY-BASKET-1, the owner's decision of 2026-11-19,
+# #1385; calculated/latency_basket.py): a FIXED basket of demand countries, each weighing the same.
+# Per basket country, the network's latency of its latency_target pulses there, by the slot rule
+# above over that country's pulses alone (each slot with min_latency_successes successes in it
+# weighs the same). A basket country the network has no such latency in (not served, or too few
+# successes in the window) counts as the slowest network's of the same kind and window there
+# (penalty "slowest_network"; each percentile its own slowest). The network figure is the plain
+# mean (aggregate "mean"; "median" is the other choice) of the basket countries' values; a basket
+# country no network of the kind has a latency in is left out for all. A network with no basket
+# country of its own has no latency (no Speed). The basket: the 38 largest countries of a neutral
+# demand proxy, 50% share of world GDP + 50% share of world internet users (World Bank 2024; Taiwan
+# IMF), 86.5% of it; ordered by that share. Without this table the headline is the pooled latency
+# of every country the network is tested in (HEADLINE-PULSE-1). Product group windows, the latency
+# under load, the other targets' latency, the per-place latency and the latency change keep their
+# rules.
+[latency]
+basket = [
+  "CN", "US", "IN", "JP", "DE", "BR", "ID", "GB", "RU", "FR", "MX", "IT", "PK", "CA", "KR", "TR",
+  "ES", "AU", "BD", "VN", "NG", "EG", "IR", "PH", "SA", "TH", "NL", "PL", "AR", "ZA", "CO", "TW",
+  "CH", "MY", "IQ", "DZ", "BE", "PE",
+]
+aggregate = "mean"
+penalty = "slowest_network"
+
 # Uptime is outage time over the measured time (basis = "measured_time"): 1 - the sum over the
 # countries tested in the window of their downtime clipped to their measured span / the sum of
 # their measured spans. A country's measured span runs from the start of its first tested run (a
