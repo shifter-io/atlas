@@ -346,7 +346,7 @@ async def test_interact_numbers_must_be_ints_not_named_like_a_selector(numbers):
 
 
 async def test_a_run_serves_cache_urls_from_its_own_networks_cache():
-    from atlas.browser.lean import network_cache
+    from atlas.browser.asset_cache import network_cache
 
     harness = Harness()
     await harness.execute()

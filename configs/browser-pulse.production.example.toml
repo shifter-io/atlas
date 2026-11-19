@@ -23,6 +23,7 @@ block_resources = ["image", "media", "font"]
 screenshots = "failures"
 locale = "en-US"
 engine = "camoufox"             # targets without their own engine
+cache_hours = 24                # a kept public file lives at most a day (BROWSER-BYTES-1)
 
 [chrome]
 executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # the default
@@ -136,6 +137,8 @@ block_urls = [
   "*://www.google.com/maps/vt*",
   "*://www.google.com/complete/*",
 ]
+# Google's scripts and the overview's app, kept for later tries (public files only, asset_cache.py).
+cache_urls = ["https://www.google.com/xjs/*", "https://www.gstatic.com/_/mss/*"]
 inputs = ["example question"]
 
 [[target]]
