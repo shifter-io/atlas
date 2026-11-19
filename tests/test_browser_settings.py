@@ -319,6 +319,20 @@ def test_minimal_settings(tmp_path):
     assert settings.untargeted == () and not settings.is_untargeted("example-a/residential")
 
 
+def test_a_run_uses_browsers_per_run_else_browsers_per_host(tmp_path):
+    # MINIS-ROLLOUT-1: a run's tries at once through its network, at most the host's browsers.
+    doc = document()
+    assert load_settings(write(tmp_path, doc)).browser.run_browsers() == 10
+    doc["browser"]["browsers_per_run"] = 2
+    browser = load_settings(write(tmp_path, doc)).browser
+    assert (browser.browsers_per_host, browser.browsers_per_run) == (10, 2)
+    assert browser.run_browsers() == 2
+    for wrong in (0, 11, 2.0, "2"):
+        doc["browser"]["browsers_per_run"] = wrong
+        with pytest.raises(UserError, match=r"browser\.browsers_per_run: .* 1 to 10"):
+            load_settings(write(tmp_path, doc))
+
+
 def test_a_host_may_open_up_to_48_browsers(tmp_path):
     # The new minis' capacity ramp goes past the old cap of 16 (BROWSER-BYTES-3).
     doc = document()
