@@ -116,6 +116,15 @@ def test_gemini_blocks_only_what_its_answer_never_needs():
     assert not any(fnmatch.fnmatchcase(u, rule) for u in needed for rule in gemini.block_urls)
 
 
+def test_linkedin_caches_only_its_content_hashed_stylesheets():
+    # BROWSER-BYTES-5: about 0.12 MB a try with an empty cache, about 0.054 MB warm.
+    [linkedin] = [t for t in load_settings(TEMPLATE).targets if t.id == "linkedin_public"]
+    assert linkedin.cache_urls == ("https://static.licdn.com/aero-v1/sc/h/*",)
+    # Only the content-hashed static files: never a profile, the authwall or an API.
+    pages = ("https://www.linkedin.com/in/x/", "https://www.linkedin.com/authwall")
+    assert not any(fnmatch.fnmatchcase(u, p) for u in pages for p in linkedin.cache_urls)
+
+
 def test_the_challenge_target_never_blocks_or_caches_the_challenge():
     # BROWSER-BYTES-3: about 1.76 MB a try before, about 1.16 MB with these blocks and the
     # private file's cache rules, results unchanged.

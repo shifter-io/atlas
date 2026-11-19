@@ -66,6 +66,9 @@ browser_seconds = 2760
 # the server; no script is needed for either.
 wait_until = "domcontentloaded"
 block_resources = ["image", "media", "font", "script"]
+# BROWSER-BYTES-5: its content-hashed stylesheets (public, immutable) come from the host's cache
+# after a network's first try.
+cache_urls = ["https://static.licdn.com/aero-v1/sc/h/*"]
 inputs = ["example"]
 
 [[target]]
