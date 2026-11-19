@@ -44,7 +44,7 @@ def both(outages, runs, since, end=END):
 
 
 def test_a_country_measured_two_of_seven_days_divides_by_its_two_days():
-    # Shifter's case: 13.2 min down, pulses every 30 min over the last 2 days of a 7d window.
+    # A real network's case: 13.2 min down, pulses every 30 min over the last 2 days of a 7d window.
     starts = [ago(2) + i * timedelta(minutes=30) for i in range(96)]
     runs = [run("US", t, t + timedelta(seconds=50)) for t in starts]
     runs[-1]["last"] = END
