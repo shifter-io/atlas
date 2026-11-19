@@ -85,6 +85,7 @@ def build_app(
 
     async def startup(_: web.Application) -> None:
         if with_scheduler:
+            await scheduler.fail_leftovers()
             scheduler.start()
         log.info("orchestrator ready%s", " (dev)" if dev else "")
 

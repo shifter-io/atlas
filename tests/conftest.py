@@ -178,6 +178,15 @@ def own_host_key_store(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def no_server_calculation_lock():
+    """No calculation takes the server's lock file (calculated/run_lock.py): the parallel test
+    workers' calculations, each of its own database, never refuse each other."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("ATLAS_CALCULATE_LOCK", "")
+        yield
+
+
+@pytest.fixture(autouse=True)
 def countries_without_verdicts_count(request):
     """The production methodology counts a network's country only while its latest daily test
     found its country_min_ips unique IPs (country_verdicts, COUNTRY-MIN-IPS-1). A test's
