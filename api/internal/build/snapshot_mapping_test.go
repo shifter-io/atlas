@@ -6,9 +6,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // The committed fixture is a v1 snapshot without outages; this publishes it
@@ -59,8 +59,12 @@ func TestEveryRequestSnapshotsMapLatencyPricingAndCopy(t *testing.T) {
 	res := publishedBuild(t, snapshot)
 	p := res.Details["shifter"].Provider
 	w := res.Details["shifter"].Windows["residential"]["24h"]
-	if !w.LightLatencyP50.OK() || !(w.LatencyP50 > w.LightLatencyP50) {
-		t.Errorf("headline %v should be the latency under load, above light load %v", w.LatencyP50, w.LightLatencyP50)
+	// The headline is the pulses' latency (HEADLINE-PULSE-1), the light-load
+	// fields equal it, and the latency under load is served beside it.
+	if !w.LightLatencyP50.OK() || w.LatencyP50 != w.LightLatencyP50 || !(w.UnderLoadLatencyP50 > w.LatencyP50) ||
+		w.LatencyUnderLoad == nil || *w.LatencyUnderLoad {
+		t.Errorf("headline %v should be light load %v, under load %v beside it (flag %v)", w.LatencyP50, w.LightLatencyP50,
+			w.UnderLoadLatencyP50, w.LatencyUnderLoad)
 	}
 	// Latency is the HTTP target's only, never the window's HTTP + HTTPS mixture.
 	var snapshotDoc struct {

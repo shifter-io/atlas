@@ -33,6 +33,10 @@ class PageTarget(BrowserTarget):
     MARKS: ClassVar[tuple[Mark, ...]] = ()
     BLOCK_STATUSES: ClassVar[frozenset[int]] = frozenset()
     SETTLE_MS: ClassVar[int] = 0
+    # What the try waits for instead of any one of wanted(): a page whose parts arrive one by
+    # one (a profile's header before its posts) is only read once it is whole, or shows a
+    # failure. Empty: any of wanted(), as before.
+    READY: ClassVar[tuple[str, ...]] = ()
     # Once shown(): the PageView fields blank for the marks, markers and rules (see judge()),
     # or with SHOWN_OK an ok right after the 407 step.
     SHOWN_UNREAD: ClassVar[tuple[str, ...]] = ("title", "text_head")
@@ -40,7 +44,8 @@ class PageTarget(BrowserTarget):
 
     def page(self, context: RequestContext, inputs: tuple[Any, ...]) -> PageSpec:
         value = choose(context, inputs)
-        return PageSpec(self.address(value), selector_list(*self.wanted(value)), self.SETTLE_MS)
+        wanted, ready = selector_list(*self.wanted(value)), selector_list(*self.READY)
+        return PageSpec(self.address(value), wanted, self.SETTLE_MS, ready=ready or None)
 
     def try_fields(self, context: RequestContext, inputs: tuple[Any, ...]) -> dict[str, Any]:
         """The try record's `input` and `source` for this try: page targets have no source."""

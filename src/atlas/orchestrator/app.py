@@ -6,9 +6,10 @@ environment; without a password the admin answers only over loopback in --dev, a
 refuses to start outside --dev. With a certificate and key, `serve` answers HTTPS only (the
 manager's one node API port, MANAGER-ORCH-1). With a browser port and a client CA as well,
 the same app also listens there for the browser hosts (BROWSER-MTLS-1): HTTPS that requires a
-client certificate of that CA, the node API only (api.node_auth). The admin API has a listener
-of its own (SEC-MANAGER-1): `Listeners.admin` (host, port), loopback and the node port + 3 by
-default, with the node port's TLS; the node and browser ports answer 404 for it.
+client certificate of that CA, the node API only (api.node_auth), and with a revocation list
+(SEC-MINI-KEYS-1, --client-crl) it refuses a certificate the list revokes. The admin API has a
+listener of its own (SEC-MANAGER-1): `Listeners.admin` (host, port), loopback and the node port
++ 3 by default, with the node port's TLS; the node and browser ports answer 404 for it.
 """
 
 from __future__ import annotations
@@ -22,8 +23,19 @@ from pathlib import Path
 
 from aiohttp import web
 
+from ..node_tls import CRL_BEGIN
+from ..providers.dbconnect import connect_options
+from . import pulse_enrich
 from .admin import routes as admin
-from .api import ADMIN_PORT_KEY, BROWSER_TLS_KEY, CREDENTIALS_KEY, DB_KEY, add_routes, node_auth
+from .api import (
+    ADMIN_PORT_KEY,
+    BROWSER_TLS_KEY,
+    CREDENTIALS_KEY,
+    DB_KEY,
+    INGEST_CREDENTIALS_KEY,
+    add_routes,
+    node_auth,
+)
 from .db import Database
 from .jobs import register_jobs
 from .scheduler import Scheduler
@@ -53,6 +65,9 @@ def build_app(
     database = db or Database(credentials_file)
     app[DB_KEY] = database
     app[CREDENTIALS_KEY] = str(credentials_file)
+    enricher = pulse_enrich.configured()  # $DBIP_MMDB, for the pulse uploads
+    if enricher is not None:
+        app[pulse_enrich.ENRICHER_KEY] = enricher
     scheduler = Scheduler(database)
     register_jobs(
         scheduler, database, str(credentials_file), Path(methodology) if methodology else None
@@ -70,11 +85,14 @@ def build_app(
 
     async def startup(_: web.Application) -> None:
         if with_scheduler:
+            await scheduler.fail_leftovers()
             scheduler.start()
         log.info("orchestrator ready%s", " (dev)" if dev else "")
 
     async def cleanup(_: web.Application) -> None:
         await scheduler.stop()
+        if enricher is not None:
+            enricher.close()
         if db is None:
             await database.close()
 
@@ -83,22 +101,51 @@ def build_app(
     return app
 
 
+def use_ingest_login(app: web.Application, ingest_file: str | None) -> None:
+    """Uploads ingest with `ingest_file`'s login, one that may only add run data
+    (SEC-INGEST-ROLE-1); the jobs and everything else keep the app's database file, as do the
+    uploads when it is None. A file that cannot be read stops the start, not the first upload."""
+    if ingest_file:
+        connect_options(ingest_file)
+        app[INGEST_CREDENTIALS_KEY] = str(ingest_file)
+
+
 def server_tls(
-    cert: str | None, key: str | None, client_ca: str | None = None
+    cert: str | None, key: str | None, client_ca: str | None = None, client_crl: str | None = None
 ) -> ssl.SSLContext | None:
     """The HTTPS context for a certificate and its key (TLS 1.2 or later); None for neither.
-    With `client_ca`, the handshake requires a client certificate signed by that CA alone."""
+    With `client_ca`, the handshake requires a client certificate signed by that CA alone; with
+    `client_crl` as well, one its CA's list does not revoke."""
     if not cert and not key:
         return None
     if not (cert and key):
         raise ValueError("--tls-cert and --tls-key go together")
+    if client_crl and not client_ca:
+        raise ValueError("--client-crl needs --client-ca")
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)  # no public CA can vouch for a client
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
     if client_ca:
         context.verify_mode = ssl.CERT_REQUIRED
         context.load_verify_locations(cafile=client_ca)
+    if client_crl and _has_crl(client_crl):
+        context.load_verify_locations(cafile=client_crl)  # loads the PEM's lists too
+        context.verify_flags |= ssl.VERIFY_CRL_CHECK_LEAF
     return context
+
+
+def _has_crl(path: str) -> bool:
+    """Whether the PEM file `path` holds a revocation list. It must exist; it is empty only
+    while hosts of a retired CA without one are still switching (then nothing is checked), and
+    with a list, a client CA without a list of its own there is refused. Anything else in it
+    (another file given by mistake) is refused, never taken as "no list"."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        raise ValueError("--client-crl cannot be read") from None
+    if data.strip() and CRL_BEGIN not in data:
+        raise ValueError("--client-crl holds no revocation list (an empty file checks nothing)")
+    return CRL_BEGIN in data
 
 
 Site = tuple[str, int, ssl.SSLContext | None]
@@ -138,12 +185,14 @@ Admin = tuple[str, int | None]
 @dataclass(frozen=True)
 class Listeners:
     """Where `serve` listens: the node API's host and port, the browser port (port, client CA)
-    if any, and the admin API's (host, port), port None being the node port + 3."""
+    if any, and the admin API's (host, port), port None being the node port + 3. `client_crl`
+    is the browser port's revocation list file."""
 
     host: str = "127.0.0.1"
     port: int = 8080
     browser: Browser | None = None
     admin: Admin = ("127.0.0.1", None)
+    client_crl: str | None = None
 
 
 def listen(app: web.Application, node: Site, browser: Site | None, admin: Site) -> list[Site]:
@@ -161,18 +210,20 @@ def listen(app: web.Application, node: Site, browser: Site | None, admin: Site) 
 
 
 def browser_tls(
-    tls: tuple[str | None, str | None], browser: Browser | None
+    tls: tuple[str | None, str | None], browser: Browser | None, client_crl: str | None = None
 ) -> ssl.SSLContext | None:
-    """The browser port's context (the server's certificate, client certificates of the CA);
-    None without a browser port (port, client CA), refused with half of one."""
+    """The browser port's context (the server's certificate, client certificates of the CA not
+    in `client_crl`); None without a browser port (port, client CA), refused with half of one."""
     port, client_ca = browser or (None, None)
     if port is None and not client_ca:
+        if client_crl:
+            raise ValueError("--client-crl needs --browser-port and --client-ca")
         return None
     if port is None or not client_ca:
         raise ValueError("--browser-port and --client-ca go together")
     if not (tls[0] and tls[1]):
         raise ValueError("--browser-port needs --tls-cert and --tls-key")
-    return server_tls(*tls, client_ca=client_ca)
+    return server_tls(*tls, client_ca=client_ca, client_crl=client_crl)
 
 
 def serve(
@@ -182,12 +233,14 @@ def serve(
     dev: bool = False,
     methodology: str | Path | None = None,
     tls: tuple[str | None, str | None] = (None, None),
+    ingest_file: str | None = None,
 ) -> None:
     """Run until SIGINT or SIGTERM on the listeners `at`. --dev logs verbosely and refuses to
-    bind beyond loopback; `tls` (certificate, key) serves HTTPS on every port."""
+    bind beyond loopback; `tls` (certificate, key) serves HTTPS on every port; `ingest_file`
+    is use_ingest_login's."""
     at = at or Listeners()
     host, port, browser = at.host, at.port, at.browser
-    context, browser_context = server_tls(*tls), browser_tls(tls, browser)
+    context, browser_context = server_tls(*tls), browser_tls(tls, browser, at.client_crl)
     admin_host, admin_port = at.admin
     admin_site = (admin_host, admin_port or port + ADMIN_PORT_OFFSET, context)
     for bound in (host, admin_site[0]):
@@ -205,6 +258,7 @@ def serve(
     # psycopg logs every statement at DEBUG; keep it quiet even in dev.
     logging.getLogger("psycopg").setLevel(logging.INFO)
     app = build_app(credentials_file, dev=dev, methodology=methodology)
+    use_ingest_login(app, ingest_file)
     browser_site = None
     if browser and browser[0] is not None and browser_context:
         browser_site = (host, browser[0], browser_context)

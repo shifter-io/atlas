@@ -12,8 +12,11 @@ scores and browser_overall rank the networks of one kind (target_scores.score_ne
 
 DAY-SCORE-1: each network's `days` are its 30d window's days, the slices of its series (a day
 apart from the window's start, so the last is the 24h window): each day's success_overall, the
-day's targets measured as a window's (Network.days()) and scored as the windows are, the
-networks of one kind ranked per day (target_scores.score_days()).
+day's targets and daily tests measured as a window's (Network.days()) and scored as the windows
+are, the networks of one kind per day (target_scores.score_days()). A window's and a day's
+"_success" are their card targets' tries (card_success.counts(), browser targets over the 7 days
+for a 24h span), which target_scores.score_networks() turns into success_overall
+(SUCCESS-ALL-8-1).
 
 attach() completes the windows in store.write(), once the network lists are written:
 
@@ -32,29 +35,50 @@ attach() completes the windows in store.write(), once the network lists are writ
 - the ownership overlap, counted in the database over the same window-bounded IPs (7d and 30d
   once a UTC day, carried from the previous head of the same implementation in between while it
   has pairs), and the balanced score, rank and readiness, against the networks of the same kind
-  and window (network_scores.py).
+  and window (network_scores.py);
+- the Atlas Score trend (atlas_score_spark): that balanced score with the earlier published
+  builds' (score_history.py, ATLAS-SCORE-SPARK-1).
 """
 
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from collections import defaultdict
 from datetime import timedelta
 
-from . import browser, fleetsql, hourly, netlists, network_scores, parts, target_scores
+from .. import verdicts
+from . import (
+    browser,
+    card_success,
+    fleetsql,
+    hourly,
+    latency_basket,
+    latency_store,
+    netlists,
+    network_scores,
+    parts,
+    score_history,
+    target_scores,
+)
 from .aggregate import (
     SeriesSpec,
     floor_time,
+    in_window,
     outage_list,
     outage_uptime,
     series,
+    series_axis,
     slot_coverage,
     target_timed,
     timed,
     uptime,
     with_under_load,
 )
+from .latency_days import PERIOD_DAYS, window_delta
+from .policy import latency_basket as basket_settings
 from .policy import latency_target, slot_settings, uptime_settings
+from .underload import slot_memo, slot_rate, time_slots
 
 # Pool shares: the groups' values weighted by their unique IPs.
 SHARES = (
@@ -113,6 +137,7 @@ def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config, e
         networks = [summary(labels, context)[0] for _, labels in found]
     else:
         networks = each(found, context)
+    latency_basket.apply(networks, config)
     target_scores.score_networks(networks, config)
     target_scores.score_days(networks, config)
     return networks
@@ -127,8 +152,9 @@ def summary(labels, context):
     union = Network(groups, bucket_groups, by_product, flagged, config)
     entry = union.entry(as_of)
     cfg = configs[union.lead["id"]]  # its required targets and target groups
-    entry["windows"] = {label: union.window(ms, label, cfg) for label, ms in labels.items()}
-    entry["days"] = union.days(labels.get("30d"), cfg)
+    with slot_memo():  # its windows, days and points share their time slots' counts
+        entry["windows"] = {label: union.window(ms, label, cfg) for label, ms in labels.items()}
+        entry["days"] = union.days(labels.get("30d"), cfg)
     return entry, union.lead["id"]
 
 
@@ -137,7 +163,7 @@ class Network:
     pulse batch runs, pulse slots, outages and tested countries of its scheduled groups."""
 
     def __init__(self, groups, bucket_groups, by_product, flagged, config):
-        scheduled, pulses, outages, tested, monitored = by_product
+        scheduled, pulses, outages, tested, monitored, counting, self.verdicts = by_product
         self.groups = groups
         rows = [r for g in groups for r in bucket_groups[g["product_id"], g["cohort"]]]
         self.rows, self.browser = browser.split(rows)
@@ -161,8 +187,14 @@ class Network:
             for country, last in tested[product].items():
                 self.tested[country] = max(self.tested.get(country, last), last)
         self.monitored = [t for product in products for t in monitored[product]]
+        # Each country's counting spans, of all the scheduled products (None: not clipped).
+        self.counting = None if counting is None else defaultdict(list)
+        for product in products if counting is not None else ():
+            for country, found in counting.get(product, {}).items():
+                self.counting[country] += found
         self.minimum = slot_settings(config)["min_latency_successes"]
         self.target = latency_target(config)
+        self.basket = (basket_settings(config) or {}).get("basket")
         self.threshold = uptime_settings(config)["min_successes"]
         self.measured = uptime_settings(config)["basis"] == "measured_time"
         self.lead = lead(groups, self.scheduled)
@@ -184,52 +216,84 @@ class Network:
                 "country": None,
                 "requested_countries": sorted(asked),
                 "groups": len(self.groups),
-            },
+            }
+            | self.country_status(asked),
             "census": g["census"] if g["id"] in self.scheduled else [],
             "pricing": g["pricing"],
             "outages": outage_list(self.down, as_of - timedelta(hours=OUTAGE_HOURS), as_of),
             "evidence": g["windows"]["30d"]["evidence"] if "30d" in g["windows"] else {},
         }
 
+    def country_status(self, asked):
+        """{"country_status": each requested country's status, sorted} with the methodology's
+        country_verdicts (verdicts.status() over the groups' products), else nothing."""
+        if self.verdicts is None:
+            return {}
+        latest = [self.verdicts.get(p, {}) for p in {g["product_id"] for g in self.groups}]
+        found = [
+            {"country": c} | verdicts.status([own[c] for own in latest if c in own])
+            for c in sorted(asked)
+        ]
+        return {"country_status": found}
+
     def window(self, groups, label, cfg):
         """One window over the union, waiting for attach(): "_runs" lists its runs, "_lead"
         is the headline group's window (its evidence, network_scores.member())."""
         period = groups[0]["windows"][label]["period"]
         since, end, hours = period["start"], period["end"], period["hours"]
-        rows = self.inside(self.rows, since, end)
+        rows = in_window(self.rows, since, end, hours)
         slots = [d for d in self.pulses if since <= d["scheduled_for"] < end]
-        m = timed(rows, hours, self.minimum, slots, self.minutes)
+        m = timed(rows, hours, self.minimum, slots, self.minutes, since)
         with_under_load(m, rows, self.minimum)
         up = uptime(self.batches, since, end, self.threshold)
         runs = self.monitored if self.measured else None
-        up |= outage_uptime(self.down, self.tested, since, end, runs)
+        up |= outage_uptime(self.down, self.tested, since, end, runs, self.counting)
         m["uptime"] = up["value"]
         if self.scheduled:
             slot_coverage(m, self.batches, since, end)
         before = since - (end - since)
         previous = [d for d in self.pulses if before <= d["scheduled_for"] < since]
         prev_rows = self.inside(self.rows, before, since)
-        prev = timed(prev_rows, hours, self.minimum, previous, self.minutes)
+        prev = timed(prev_rows, hours, self.minimum, previous, self.minutes, before)
         windows = [p["windows"][label] for p in groups]
         latency = {"latency_target": self.target, "minimum": self.minimum}
         latency |= {"outages": self.down}
         points = series(rows, (), SeriesSpec(since, end, hours, tested=self.monitored, **latency))
+        point_trailing(points, self, cfg, end, hours)
         rate, old = m["success_rate"], prev["success_rate"]
-        return {
+        targets = self.targets(cfg, rows, (since, end, hours))
+        found = {
             "period": period,
             "readiness": "partial" if m["completed"] else "unavailable",
             "metrics": m,
             "uptime": up,
             "tests": {name: sum(w["tests"][name] for w in windows) for name in TESTS},
             "pool": pool([w["pool"] for w in windows]),
-            "targets": self.targets(cfg, rows, (since, end, hours)),
+            "targets": targets,
             "series": points,
             "success_delta": rate - old if rate is not None and old is not None else None,
             "scores": {},
             "overlap": None,
             "_runs": sorted({r["run_key"] for r in rows}),
             "_lead": self.lead["windows"].get(label, {}),
+            "_success": self.card_counts(cfg, card_success.http_counts(cfg, rows), end, hours),
         }
+        made = [g["windows"][label].get("breakdowns_as_of") for g in groups]
+        if any(made):  # its census-pulse member's list's cutoff, the oldest (CALC-SCALE-4)
+            found["breakdowns_as_of"] = min(m for m in made if m)
+        if self.basket:  # LATENCY-BASKET-1: latency_basket.apply() in summaries()
+            axis = (series_axis(end, hours), [p["at"] for p in points])
+            own = (rows, self.target, self.minimum, set(self.basket), axis)
+            found["_basket"] = latency_basket.measure(*own)
+        if label == "30d":  # LATENCY-DAY-STORE-1: attach() makes its month with the stored days
+            own = (self.rows, self.target, since, end, self.minimum)
+            found["_latency_days"] = latency_store.day_records(*own)
+        if label in PERIOD_DAYS:  # LATENCY-DELTA-24H-1, -PERIOD-1; 30d: its week or day here
+            days = min(PERIOD_DAYS[label], 7)
+            found["latency_day_delta"] = window_delta(
+                self.rows, self.target, end, self.minimum, days
+            )
+        return found
 
     def days(self, groups, cfg):
         """The 30d window's days (none without one): each {"start", "targets"}, the targets()
@@ -239,15 +303,21 @@ class Network:
         period = groups[0]["windows"]["30d"]["period"]
         since, end = period["start"], period["end"]
         rows, browser_rows = defaultdict(list), defaultdict(list)
-        for found, own in ((rows, self.rows), (browser_rows, self.browser)):
-            for r in self.inside(own, since, end):
-                found[(r["bucket_start"] - since) // DAY_STEP].append(r)
+        for r in self.inside(self.rows, since, end):
+            rows[(r["bucket_start"] - since) // DAY_STEP].append(r)
+        # The last day is the 24h window, with the daily tests it reaches back to (in_window()).
+        last, cut = math.ceil((end - since) / DAY_STEP) - 1, end - DAY_STEP
+        rows[last] += [r for r in in_window(self.rows, cut, end, 24) if r["bucket_start"] < cut]
+        for r in self.browser:  # browser.counted_at(): a whole run, in the day that holds its end
+            if since <= (at := browser.counted_at(cfg, r)) < end:
+                browser_rows[(at - since) // DAY_STEP].append(r)
         days = []
         for k in range(math.ceil((end - since) / DAY_STEP)):
             start = since + k * DAY_STEP
             span = (start, min(start + DAY_STEP, end), 24)
             targets = self.targets(cfg, rows[k], span, browser_rows[k])
-            days.append({"start": start, "targets": targets})
+            own = self.card_counts(cfg, card_success.http_counts(cfg, rows[k]), span[1], 24)
+            days.append({"start": start, "targets": targets, "_success": own})
         return days
 
     def targets(self, cfg, rows, span, browser_rows=None):
@@ -262,7 +332,8 @@ class Network:
             slots = self.target_pulses[target]
             slots = [d for d in slots if since <= d["scheduled_for"] < end]
             timing = (self.minimum, self.minutes, self.target)
-            tm = target_timed((target, own, extra), hours, slots, timing)
+            cut = browser.timed_since(cfg, extra, since)
+            tm = target_timed((target, own, extra), hours, slots, timing, cut)
             tm["uptime"] = uptime(batches, since, end, self.threshold)["value"]
             tm["units"] = tm["units"] | {"uptime": "fraction of pulse batches"}
             if self.scheduled and not extra:  # a browser target's coverage stays its buckets'
@@ -270,6 +341,12 @@ class Network:
             readiness = "measured" if tm["completed"] else "unavailable"
             found[target] = {"metrics": tm, "readiness": readiness, **extra}
         return found
+
+    def card_counts(self, cfg, http, end, hours):
+        """card_success.counts() of a span of `hours` ending at end: http, its HTTP targets'
+        counts, and its browser targets' over its browser window."""
+        since = card_success.browser_since(cfg, end, hours)
+        return card_success.counts(cfg, http, self.browser, since, end)
 
     @staticmethod
     def inside(rows, since, end):
@@ -316,7 +393,43 @@ def weighted(pools, key):
     return sum(value * n for value, n in found) / total if total else None
 
 
-def attach(conn, payload, written):
+def point_trailing(points, net, cfg, end, hours):
+    """Each series point's "_success" (card_success.counts()) and "trailing_success_rate" over
+    the TRAILING window of the headline's length ending at the point's end (SUCCESS-TRAILING-1,
+    #1301): the headline's own rows (in_window()), pulses and time-slot votes (time_slots(),
+    slot_rate(), as timed() makes the window's success_rate), so the newest point is the
+    window's and a steady network's points read its headline. score_networks() scores
+    "_success" as the window's success_overall; a trailing window reaching before the raw rows
+    kept has the rows that exist. A point whose trailing window holds less than one whole day of
+    the network's HTTP card target rows (before or on its first day of data) has no counts and
+    no rate: "_short", not_enough_data (SUCCESS-FULL-DAY-1), never a score from a few hours.
+    net: the Network (its rows, browser rows and pulses); cfg: its lead group's config."""
+    first, step = series_axis(end, hours)
+    span = timedelta(hours=hours)
+    oldest = first + step - span  # the first point's trailing window starts there
+    trailing = card_success.Trailing(cfg, net.rows)
+    pulses = [d for d in net.pulses if oldest <= d["scheduled_for"] < end]
+    votes = sorted(
+        (key, rate)
+        for key, s in time_slots(in_window(net.rows, oldest, end, hours), pulses).items()
+        if (rate := slot_rate(s)) is not None
+    )
+    keys = [key for key, _ in votes]
+    since = trailing.first  # its first HTTP card target row
+    for k, point in enumerate(points):
+        stop = min(first + (k + 1) * step, end)
+        start = stop - span
+        if since is None or stop - since < timedelta(days=1):
+            point |= {"_success": {}, "_short": True, "trailing_success_rate": None}
+            continue
+        own = card_success.browser_since(cfg, stop, hours)
+        http = trailing.counts(start, stop, hours)
+        point["_success"] = card_success.counts(cfg, http, net.browser, own, stop)
+        rates = [rate for _, rate in votes[bisect_left(keys, start) : bisect_left(keys, stop)]]
+        point["trailing_success_rate"] = sum(rates) / len(rates) if rates else None
+
+
+def attach(conn, payload, written, overlaps=None):
     """{"networks": payload's networks completed} for the head of a v4 payload, else {}.
 
     written is netlists.write_network_lists()'s {(network id, label): (list_id, entries,
@@ -329,13 +442,14 @@ def attach(conn, payload, written):
     for entry in payload["networks"]:
         for label, w in entry["windows"].items():
             since, end = w["period"]["start"], w["period"]["end"]
-            step = timedelta(minutes=5) if w["period"]["hours"] == 24 else timedelta(days=1)
-            for part, width in (("pool", end - since), ("series", step)):
+            first, step = series_axis(end, w["period"]["hours"])
+            for part, frm, width in (("pool", since, end - since), ("series", first, step)):
                 runs[entry["id"], label, part] = w["_runs"]
-                buckets[entry["id"], label, part] = (since, end, width)
+                buckets[entry["id"], label, part] = (frm, end, width)
     counted = hourly.bucket_ips(conn, runs, buckets)
+    latency_store.complete(conn, payload["networks"], payload["as_of"])
     previous = parts.previous(conn, groups=False)
-    shared = network_scores.overlap(conn, payload, previous)
+    shared = network_scores.overlap(conn, payload, previous, overlaps)
     estimated = defaultdict(list)
     for group in payload["products"]:
         for label, w in group["windows"].items():
@@ -353,6 +467,7 @@ def attach(conn, payload, written):
             windows[label]["overlap"] = shared[key]
         networks.append(entry | {"windows": windows})
     network_scores.score(networks, payload, previous)
+    score_history.spark(conn, networks, payload["as_of"], payload["methodology"]["id"])
     target_scores.previous_scores(networks, previous, payload["as_of"])
     return {"networks": networks}  # store.write() validates them (validate())
 

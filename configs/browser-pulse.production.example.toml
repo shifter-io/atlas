@@ -1,4 +1,4 @@
-# Production browser pulse settings (schema 2): the manager's and the three minis' daily queue
+# Production browser pulse settings (schema 2): the manager's and the three minis' 22-hour queue
 # (BROWSER-HOSTS-SETTINGS-1). No secrets and no real inputs: the private file is a copy of this
 # one with the real inputs and enabled = true (docs/browser.html, "Manager runbook").
 # Every field is described in browser-pulse.example.toml.
@@ -8,12 +8,14 @@ enabled = false                 # true only in the private file, once the hosts 
 [schedule]
 countries = ["US"]
 lead_seconds = 60
-plan = "queue"                  # each host's daily queue (K-BP5)
-queue_period_minutes = 1440     # every (network, target) once a UTC day
+plan = "queue"                  # each host's queue (K-BP5)
+queue_period_minutes = 1320     # every (network, target) every 22 h, so each 24 h window
+                                # holds a complete run (BROWSER-CYCLE-22H-1)
+queue_start = 2026-11-18T00:00:00Z   # the switch from the daily queue: a coming UTC midnight
 run_deadline_minutes = 180
 
 [browser]
-browsers_per_host = 2           # 2 on each mini: a load of about 76%
+browsers_per_host = 2           # 2 on each mini: a load of about 83%
 recycle_after = 1               # a new browser profile per request, on both engines
 page_timeout_s = 45
 headless = true
@@ -21,6 +23,7 @@ block_resources = ["image", "media", "font"]
 screenshots = "failures"
 locale = "en-US"
 engine = "camoufox"             # targets without their own engine
+cache_hours = 24                # a kept public file lives at most a day (BROWSER-BYTES-1)
 
 [chrome]
 executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # the default
@@ -29,86 +32,157 @@ executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # 
 dir = "outbox"
 max_pending_gb = 20
 
-# The 9 targets: 100 tries per network once a day, on the owner's engine, with the measured
+# The 9 targets: 100 tries per network every 22 hours, on the owner's engine, with the measured
 # browser-seconds of one run on that engine (the queue's order and load check). Inputs are
 # placeholders; the real ones live only in the private file.
 
 [[target]]
 id = "amazon_pdp"
 tries = 100
-every_minutes = 1440
+every_minutes = 1320
 engine = "chrome"
 browser_seconds = 1450
+# BROWSER-BYTES-2: title and price are in the product page's HTML; its scripts (most of the
+# bytes) never decide a verdict. Stylesheets stay: the "Buy used" price is read from visible text.
+wait_until = "domcontentloaded"
+block_resources = ["image", "media", "font", "script"]
 inputs = ["0306406152"]
 
 [[target]]
 id = "google_search"
 tries = 100
-every_minutes = 1440
+every_minutes = 1320
 engine = "camoufox"
 browser_seconds = 1350
+wait_until = "domcontentloaded"   # read once its HTML is parsed (BROWSER-BYTES-1)
 inputs = ["example query"]
 
 [[target]]
 id = "linkedin_public"
 tries = 100
-every_minutes = 1440
+every_minutes = 1320
 engine = "chrome"
+chrome_services = false         # BROWSER-BYTES-5: no Chrome calls to Google (~30 KB a try)
 browser_seconds = 2760
+# BROWSER-BYTES-2: name and headline are in the profile's HTML, and the authwall comes from
+# the server; no script is needed for either.
+wait_until = "domcontentloaded"
+block_resources = ["image", "media", "font", "script"]
 inputs = ["example"]
 
 [[target]]
 id = "instagram_web"
 tries = 100
-every_minutes = 1440
+every_minutes = 1320
 engine = "chrome"
 browser_seconds = 2520
+# BROWSER-BYTES-2: read once header and a post are both there (READY); its scripts render
+# them, so only stylesheets are blocked (the rules read selectors, never styled text).
+wait_until = "domcontentloaded"
+block_resources = ["image", "media", "font", "stylesheet"]
+cache_urls = ["https://static.cdninstagram.com/*"]   # its app scripts, kept warm (asset_cache.py)
 inputs = [{site = "instagram", handle = "example"}]
 
 [[target]]
 id = "x_web"
 tries = 100
-every_minutes = 1440
-engine = "camoufox"
-browser_seconds = 710
+every_minutes = 1320
+engine = "chrome"               # Instagram's engine, so social_web is one score (SOCIAL-ENGINE-1)
+browser_seconds = 740
+wait_until = "domcontentloaded"   # BROWSER-BYTES-2: as instagram_web
+block_resources = ["image", "media", "font", "stylesheet"]
+cache_urls = ["https://abs.twimg.com/*"]   # its app scripts, kept warm (asset_cache.py)
 inputs = ["example"]            # X handles
 
 [[target]]
 id = "cloudflare_challenge"
 tries = 100
-every_minutes = 1440
+every_minutes = 1320
 engine = "camoufox"
 browser_seconds = 4520
 challenge_wait_s = 20
+# BROWSER-BYTES-3: the protected pages' chat, consent and analytics widgets, never the challenge
+# (challenges.cloudflare.com, /cdn-cgi/) or a site's own anti-bot service. The private file
+# adds cache_urls for its input sites' own versioned static paths (never a /cdn-cgi/ path).
+block_urls = [
+  "https://www.googletagmanager.com/*",
+  "https://www.google-analytics.com/*",
+  "https://accounts.google.com/gsi/*",
+  "https://*.qualified.com/*",
+  "https://cdn.cookielaw.org/*",
+  "https://cmp.osano.com/*",
+  "https://transcend-cdn.com/*",
+]
 inputs = [{url = "https://example.com/protected", expect = "Example Domain"}]
 
 [[target]]
 id = "ai_overview"
 tries = 100
-every_minutes = 1440
+every_minutes = 1320
 engine = "camoufox"
 browser_seconds = 1470
 answer_wait_s = 30
+wait_until = "domcontentloaded"   # BROWSER-BYTES-1; the overview's own scripts still load
+# Never what the overview needs (Google's /xjs/ scripts, its /_/mss/ app, /async/ answers):
+# the account bar, video players, telemetry, ads, map tiles and search suggestions.
+block_urls = [
+  "https://www.gstatic.com/og/*",
+  "*://www.youtube.com/*",
+  "*://*.ytimg.com/*",
+  "*://img.youtube.com/*",
+  "*://www.google.com/gen_204*",
+  "*://www.google.com/client_204*",
+  "*://play.google.com/log*",
+  "*://www.googletagmanager.com/*",
+  "*://www.googleadservices.com/*",
+  "*://www.google.com/pagead/*",
+  "*://googleads.g.doubleclick.net/*",
+  "*://www.google.com/maps/vt*",
+  "*://www.google.com/complete/*",
+]
+# Google's scripts and the overview's app, kept for later tries (public files only, asset_cache.py).
+cache_urls = ["https://www.google.com/xjs/*", "https://www.gstatic.com/_/mss/*"]
 inputs = ["example question"]
 
 [[target]]
 id = "ai_chatgpt"
 tries = 100
-every_minutes = 1440
+every_minutes = 1320
 engine = "camoufox"
 browser_seconds = 5800
 answer_wait_s = 60
-block_resources = []
+block_resources = ["image", "media", "font"]
+# BROWSER-BYTES-3: ChatGPT's content-hashed app files (public, immutable) come from the host's
+# cache after a network's first try; the page, its anti-bot script and the answer stay live.
+# Google's sign-in prompt is never shown to a logged-out visitor.
+block_urls = ["https://accounts.google.com/gsi/*"]
+cache_urls = [
+  "https://chatgpt.com/unauth-mweb/assets/*",
+  "https://chatgpt.com/unauth-mweb/scripts/*",
+  "https://chatgpt.com/cdn/assets/*",
+  "https://chatgpt.com/_next/static/*",
+]
 inputs = ["example question"]   # exactly one fixed question
 
 [[target]]
 id = "ai_gemini"
 tries = 100
-every_minutes = 1440
+every_minutes = 1320
 engine = "chrome"
 browser_seconds = 1360
 timeout_s = 60
 answer_wait_s = 60
+# BROWSER-BYTES-3: analytics, ads, Gemini's decorative images and its feedback widget, never
+# what the answer needs. Its script bundles get a new address on every try, so none is cached.
+block_urls = [
+  "https://www.googletagmanager.com/*",
+  "https://www.googleadservices.com/*",
+  "https://*.doubleclick.net/*",
+  "https://www.google-analytics.com/*",
+  "https://analytics.google.com/*",
+  "https://www.gstatic.com/lamda/images/*",
+  "https://www.gstatic.com/feedback/*",
+]
 inputs = ["example question"]   # exactly one fixed question
 
 # The three minis, 6 networks each, as in the 24-hour run (BP-VERIFY-3). Logical names only.

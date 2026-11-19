@@ -4,15 +4,19 @@ package build
 // null field (CODES-CATALOG-1).
 
 func init() {
-	RegisterCodeSet(CodeSet{Name: "score_status", Source: CodesFromAPI, UsedIn: []string{"* **.successScore.status",
+	RegisterCodeSet(CodeSet{Name: "score_status", Source: CodesFromAPI, UsedIn: []string{"* **.successScore.status", "* **.exclusiveScore.status",
 		"* **.scores.<id>.status", "* **.statuses[]", "* **.browserOverall.<id>.success.status", "/v1/targets targets[].scoreStatus.<id>.status",
 		"/v1/networks/{slug}/chart success[].status", "/v1/home market.mostReliable.status"},
 		Values: codes(scoreRanked, "Scored and ranked among the networks of its kind.",
 			notEnoughData, "Too few tries to score.",
 			scoreTooFewNetworks, "Too few networks of the kind to rank.",
-			scoreNoRankedTargets, "None of its targets is ranked.")})
+			scoreNoRankedTargets, "None of its targets is ranked.",
+			scorePartialTargets, "Scored and ranked on the targets with tries: at least one card target had none in the window.",
+			atlasNotScored, "An Atlas Score trend point: the build of that hour or day published no Atlas Score for the network.",
+			atlasNoHistory, "An Atlas Score trend point: no published build's score is stored for that hour or day (before the history began).",
+			atlasEarlierRule, "An Atlas Score trend point scored under an earlier methodology: shown where the current one has no score for that hour or day.")})
 	RegisterCodeSet(CodeSet{Name: "score_basis", Source: CodesFromAPI, UsedIn: []string{"* **.successScore.basis"},
-		Values: codes(DayScoreBasis, "The network's success over every target, ranked among its kind.",
+		Values: codes(DayScoreBasis, "The network's success on the 8 card targets, each scored by its distance from the best network of its kind, equal weights.",
 			MarketScoreBasis, "The median network's success rate.",
 			FleetScoreBasis, "The mean success rate of the networks.",
 			PassScoreBasis, "The success rate of the tests themselves.")})
@@ -20,7 +24,7 @@ func init() {
 		UsedIn: []string{"* **.breakdown.<key>", "/v1/meta weights.<key>", "/v1/meta profiles[].weights.<key>",
 			"/v1/rankings weights.<key>", "/v1/rankings profiles[].weights.<key>"},
 		Values: codes("reliability", "Success on the required targets.",
-			"speed", "Latency under load.",
+			"speed", "Latency of normal requests (the pulses).",
 			"uptime", "Availability in the pulse tests.",
 			"coverage", "Countries served.",
 			"diversity", "Spread of the exit addresses over networks.",
@@ -47,10 +51,14 @@ func init() {
 			NANoCheaperPeer, "No cheaper network of the kind with a success rate close enough.",
 			NANoPulseFleet, "No pulse batch in the published snapshot.",
 			NANotNamedByProvider, "The provider names no plan or pool.",
+			NAMethodologyFileUnknown, "The API holds no rules file for this methodology id.",
 			NANoEvidence, "No monitoring evidence in the window.",
 			NANoScoreToCompare, "No earlier score to compare with.",
 			NANoPulseTests, "Too few finished pulse tests.",
 			NANoLoadTest, "No load test in the window.",
+			NANeedsTwoDays, "The latency change needs two whole days of daily tests.",
+			NANeedsTwoPeriods, "Before the day fallback: the 7d or 30d latency change needed two periods of 7 or 30 whole days.",
+			NADayNotCovered, "A day or period the latency change compares has too few tested countries or successes.",
 			NARequiredTarget, "A required target has no ready result.",
 			NANoPrice, "No verified, dated price per GB.",
 			NAFewRequests, "Fewer requests than the methodology requires.",

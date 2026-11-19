@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/config"
 	"github.com/jackc/pgx/v5"
+	"github.com/shifter-io/atlas/api/internal/config"
 )
 
 // DB is one scratch database.

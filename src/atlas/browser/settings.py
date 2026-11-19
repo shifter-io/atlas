@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import tomllib
 from dataclasses import dataclass, fields, replace
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
 from types import MappingProxyType
@@ -20,6 +21,8 @@ from ..errors import UserError
 from ..orchestrator import browser_queue
 from ..regions import load_countries, load_targets
 from . import contracts as c
+from . import lean
+from .asset_cache import MAX_HOURS
 from .chrome import DEFAULT_EXECUTABLE
 from .contracts import check_fields, check_int, check_string
 from .engines import DEFAULT_ENGINE, ENGINES
@@ -27,6 +30,9 @@ from .engines import DEFAULT_ENGINE, ENGINES
 SCHEMA = 2
 SCREENSHOTS = ("failures", "all", "none")
 PLANS = ("slots", "queue")
+# The most browsers a host may open at once (pool size), raised from 16 for the new minis'
+# capacity ramp (BROWSER-BYTES-3); the production value is the measured limit, far below it.
+MAX_BROWSERS_PER_HOST = 48
 # Playwright resource types a run may block; never the document itself.
 RESOURCE_TYPES = frozenset(
     "stylesheet image media font script texttrack"
@@ -45,6 +51,8 @@ class Schedule:
     plan: str = "slots"
     queue_period_minutes: int = 1440
     run_deadline_minutes: int = 180
+    # The UTC midnight the queue's periods count from; before it the daily queue (browser_queue).
+    queue_start: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +71,12 @@ class BrowserOptions:
     idle_timeout_s: float = 120
     # A run whose counters have not moved for this long is stopped and reported 'stalled'.
     stall_minutes: float = 30
+    block_urls: tuple[str, ...] = ()
+    cache_urls: tuple[str, ...] = ()
+    wait_until: str = "load"
+    chrome_services: bool = True
+    # The longest life of a kept public file, in hours (asset_cache.py; 0.25 = 15 minutes).
+    cache_hours: float = 0.25
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +107,10 @@ class TargetSettings:
     engine: str | None = None
     # The estimated cost of one run, in browser-seconds: the queue's order and load check.
     browser_seconds: int | None = None
+    block_urls: tuple[str, ...] | None = None
+    cache_urls: tuple[str, ...] | None = None
+    wait_until: str | None = None
+    chrome_services: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +244,7 @@ TARGET_CHECKS = {
     "answer_wait_s": partial(check_int, low=0, high=600),
     "engine": partial(_choice, options=ENGINES),
     "browser_seconds": partial(check_int, low=1, high=1_000_000),
+    **lean.CHECKS,
 }
 TARGET_OPTIONAL = tuple(TARGET_CHECKS)
 
@@ -275,7 +294,7 @@ def _untargeted(value: Any, run: set[str]) -> tuple[str, ...]:
 
 
 def _schedule(value: Any, countries: dict[str, str]) -> Schedule:
-    queue = ("plan", "queue_period_minutes", "run_deadline_minutes")
+    queue = ("plan", "queue_period_minutes", "run_deadline_minutes", "queue_start")
     entry = check_fields(value, ("countries", "lead_seconds"), "schedule", queue)
     codes = _list(entry["countries"], "schedule.countries", 1, len(countries))
     for index, code in enumerate(codes):
@@ -286,16 +305,27 @@ def _schedule(value: Any, countries: dict[str, str]) -> Schedule:
         for key, default in (("queue_period_minutes", 1440), ("run_deadline_minutes", 180))
     }
     plan = _choice(entry.get("plan", "slots"), "schedule.plan", PLANS)
-    return Schedule(_unique(codes, "schedule.countries"), lead, plan, **minutes)
+    start = _midnight(entry["queue_start"]) if "queue_start" in entry else None
+    return Schedule(_unique(codes, "schedule.countries"), lead, plan, **minutes, queue_start=start)
+
+
+def _midnight(value: Any) -> datetime:
+    """schedule.queue_start: a TOML date-time at a UTC midnight, such as 2026-11-18T00:00:00Z."""
+    offset = value.utcoffset() if isinstance(value, datetime) else None
+    if offset != timedelta(0) or value.time() != datetime.min.time():
+        _fail("schedule.queue_start", "must be a UTC midnight, such as 2026-11-18T00:00:00Z")
+    return value.astimezone(UTC)
 
 
 def _browser(value: Any) -> BrowserOptions:
-    optional = ("engine", "idle_timeout_s", "stall_minutes")
+    optional = ("engine", "idle_timeout_s", "stall_minutes", "cache_hours", *lean.CHECKS)
     names = tuple(f.name for f in fields(BrowserOptions) if f.name not in optional)
     entry = check_fields(value, names, "browser", optional)
     engine = _choice(entry.get("engine", DEFAULT_ENGINE), "browser.engine", ENGINES)
     return BrowserOptions(
-        check_int(entry["browsers_per_host"], "browser.browsers_per_host", 1, 16),
+        check_int(
+            entry["browsers_per_host"], "browser.browsers_per_host", 1, MAX_BROWSERS_PER_HOST
+        ),
         check_int(entry["recycle_after"], "browser.recycle_after", 1, c.MAX_TRIES),
         check_int(entry["page_timeout_s"], "browser.page_timeout_s", 5, 600),
         _choice(entry["headless"], "browser.headless", (False, True)),
@@ -305,7 +335,15 @@ def _browser(value: Any) -> BrowserOptions:
         engine,
         check_int(entry.get("idle_timeout_s", 120), "browser.idle_timeout_s", 10, 1800),
         check_int(entry.get("stall_minutes", 30), "browser.stall_minutes", 5, 180),
+        **{k: lean.CHECKS[k](v, f"browser.{k}") for k, v in entry.items() if k in lean.CHECKS},
+        cache_hours=_hours(entry.get("cache_hours", 0.25), "browser.cache_hours"),
     )
+
+
+def _hours(value: Any, path: str) -> float:
+    if type(value) not in (int, float) or not 0 < value <= MAX_HOURS:
+        _fail(path, f"must be a number above 0 and at most {MAX_HOURS}")
+    return float(value)
 
 
 def _chrome(value: Any) -> ChromeOptions:

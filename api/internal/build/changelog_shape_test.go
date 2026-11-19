@@ -96,7 +96,7 @@ func TestTheChangelogHasTheWebsiteShape(t *testing.T) {
 // valueKeys is the website's values keys of each entry kind.
 var valueKeys = map[string][]string{
 	"pool": {"deltaPct", "previousUniqueIps", "uniqueIps"}, "price": {"deltaPct", "fromRate", "plan", "toRate"},
-	"performance":  {"delta", "metric", "previous", "value"},
+	"performance":  {"basis", "delta", "metric", "previous", "value"},
 	"coverage":     {"comparedRange", "countries", "delta", "lostCountryCodes", "previousCountries"},
 	"authenticity": {"delta", "previous", "value"}, "methodology": {"fromId", "toId"}, "incident": {},
 }

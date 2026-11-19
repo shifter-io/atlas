@@ -15,30 +15,54 @@ their difficulty (policy.browser_difficulty()), with a rank among the networks t
 Every difficulty is a FIXED value the owner set (2026-11-12): configs/methodology.toml
 [browser_difficulty] and [http_difficulty], read as config, never derived from results (success
 rates, ranks or outcomes); they change only on the owner's word. generic_http and
-generic_https 1; amazon_pdp 2; instagram_web and x_web 3; google_search and
-cloudflare_challenge 4; linkedin_public, ai_answers and its sources 5
-(tests/test_target_difficulty.py).
+generic_https 1; amazon_pdp 2; social_web and its sources instagram_web and x_web 3;
+google_search and cloudflare_challenge 4; linkedin_public, ai_answers and its sources 5
+(tests/test_target_difficulty.py). An overall counts each group once, never its sources.
 
 SUCCESS-SCORE-CALC-1 (display only: no Index Score, Speed, rank or methodology id changes). Each
 HTTP target with metrics (HTTP_TARGETS) gains `scores.success`, the same rule and shape on the
 rate the API serves as its successRate (metrics.success_rate, over metrics.completed tries).
-Each window with a scored target gains `success_overall` = {score, rank, ranked_of, status,
-targets: {id: score}, weights: {id: weight}}: the network's ranked success scores of the HTTP
-targets and of each browser target's main engine (browser.scores), counted as browser_overall
-counts them, weighted by difficulty, an HTTP target's [http_difficulty] (policy.http_difficulty());
-ranked as browser_overall is. Every existing field keeps its value.
+Every existing field keeps its value.
+
+SUCCESS-ALL-8-1 (the owner, 2026-11-19; display only: the Atlas Score's reliability reads each
+target's metrics.success_rate, never this). Each network window gains `success_overall` = {score,
+rank, ranked_of, status, targets: {id: score}, weights: {id: weight}, missing_targets, basis},
+the Success x/10, over the card targets (success_overall(); the window's "_success",
+card_success.counts(): the tries the all-targets bill prices, a 24h window's browser targets over
+the 7 days). A target's rate is its successes over its completed tries in the window; its score
+is its distance from the best rate of the networks of the kind with tries on it in the same
+window: max(floor, 10 - slope x the gap in percentage points), unrounded, the methodology's
+[success_score] (policy.success_score()), so the best reads 10 and equal rates score the same.
+The score is the plain mean of the target scores (card_success.weights(): 1 each, 12.5% of 8
+targets), plus one offset per kind and window so the best network reads 10 (the
+API's SUCCESS-SHIFT-1 rule, applied here so a window, its days and its chart points agree), ranked
+(ties averaged) among the networks of the kind that have one. A target with no try in its window
+is left out (the weights renormalised over the others) and named in missing_targets, status
+partial_targets (as DAY-SCORE-1 counted a day's targets present);
+without any, the score, rank and ranked_of are null, status no_ranked_targets. basis is the
+methodology's, so a delta never compares two rules (previous_scores()). It replaced the daily
+tests' generic_http alone (SUCCESS-DAILY-DISTANCE-1, 2026-11-16).
+
+SUCCESS-POINTS-1 (#1301, the owner, 2026-11-17; display only). Each network window's series point
+gains `success_score` = {score, status}: the same rule over the card targets of the TRAILING window
+of the window's length ending at the point's end (point_overall(); network.point_trailing(),
+SUCCESS-TRAILING-1), the best network the kind's best over that same window, so the newest point
+is the window's own score and a steady network's line reads its headline. (A point over its own
+hour or day alone was too noisy: an hour holds the few countries whose daily test ran then.)
 
 DAY-SCORE-1 (display only). score_days() scores each network's days (network.Network.days(),
-each day's targets measured as a 24h window's) as score_networks() scores its windows: per kind,
-the networks' same day ranked against each other. Each day keeps its start and its
-success_overall without weights (they are the fixed difficulties), so a day and a one-day window
-agree, and the last day (the 24h window's span) is the 24h window's success_overall.
+each day's targets and card targets measured as a 24h window's) as score_networks() scores its
+windows: per kind, the networks' same day against each other. Each day keeps its start and its
+success_overall without weights, so a day and a one-day window agree, and the last day (the 24h
+window's span) is the 24h window's success_overall.
 
 SUCCESS-SCORE-DELTA-1 (display only). previous_scores() runs once per build on the completed
 network summaries (network.attach()): each window's success_overall and each target's success
 score (an HTTP target's scores.success, a browser target's browser.scores.success) gain
 `previous_score`, the previous published build's score of the same network, window and target,
-as retain() keeps previous_rank; null without one. The API serves score minus previous_score.
+as retain() keeps previous_rank; null without one, and success_overall's null when the previous
+build's basis is not this one's (the first build of a new rule, SUCCESS-ALL-8-1). The API serves
+score minus previous_score.
 
 CHALLENGE-BLOCK-TIE-1 (display only: challenge and block feed no success overall). A tight race on
 challenge or block is a shared first place: every ranked network scores 10, rank 1 of M, status
@@ -47,22 +71,25 @@ ranked (success kept all_similar until SUCCESS-TIE-1). Each HTTP target with met
 engine's.
 
 CHALLENGE-OVERALL-1 (display only, SUCCESS-RATE-REMOVE-1). Each window with a scored target also
-gains `challenge_overall`, success_overall's shape and rule on the targets' challenge scores (an
-HTTP target's scores.challenge, a browser target's main engine's browser.scores.challenge): their
-difficulty-weighted mean, ranked as success_overall is; 10 is the fewest challenges. It feeds no
-Index Score, Speed, rank, success score or previous_score.
+gains `challenge_overall` = {score, rank, ranked_of, status, targets, weights}: the ranked
+challenge scores of the HTTP targets (scores.challenge) and of each browser target's main engine
+(browser.scores.challenge), counted as browser_overall counts them, weighted by difficulty (an
+HTTP target's [http_difficulty], policy.http_difficulty()), ranked as browser_overall is; 10 is
+the fewest challenges. It feeds no Index Score, Speed, rank, success score or previous_score.
 
 SUCCESS-TIE-1 (the owner, 2026-11-12). A tight race on success is a shared first place too: no
-target score is ever all_similar. A tied target now counts in browser_overall and
-success_overall as a 10 at its difficulty; the Index Score and Speed read neither.
+target score is ever all_similar. A tied target now counts in browser_overall as a 10 at its
+difficulty; the Index Score and Speed read neither.
 
 SCORE-BROWSER-MIN-1 (the owner, 2026-11-15). A browser target's engine is ranked for a network only
-with the methodology's browser_min_requests completed tries in the window (500, about five runs;
-policy.browser_min_requests()), each window its own; the HTTP targets keep MIN_REQUESTS. Under it
+with the methodology's browser_min_requests completed tries in the window (100, one run, since
+BROWSER-MIN-100-1, the owner's 2026-11-16; was 500; policy.browser_min_requests()), each window
+its own, of whole runs (BROWSER-WHOLE-RUN-1: a run counts in the window that holds its end); the
+HTTP targets keep MIN_REQUESTS. Under it
 the network's success, challenge and block scores of that target are not_enough_data: the target
-is left out of its browser_overall, success_overall, challenge_overall and days (the weights
-renormalised over the targets that count) and is no peer in that target's ranking, so a single
-browser run of a network moves neither its overall nor another network's rank.
+is left out of its browser_overall and challenge_overall (the weights renormalised over the
+targets that count) and is no peer in that target's ranking, so a single browser run of a
+network under the minimum moves neither its overall nor another network's rank.
 """
 
 from __future__ import annotations
@@ -72,7 +99,14 @@ import math
 from collections import defaultdict
 from datetime import datetime
 
-from .policy import HTTP_DIFFICULTY, browser_difficulty, browser_min_requests, http_difficulty
+from .card_success import weights as card_weights
+from .policy import (
+    HTTP_DIFFICULTY,
+    browser_difficulty,
+    browser_min_requests,
+    http_difficulty,
+    success_score,
+)
 
 # A network is ranked for an HTTP target only with this many completed tries in the window (the
 # standard error of a rate near 50% is 5 points at 100 tries, 7 at 50); for a browser target the
@@ -94,13 +128,15 @@ HTTP_METRICS = {
     "block": ("block_rate", False),
 }
 RANKED = "ranked"
+# The Success x/10 of a network missing a card target (SUCCESS-ALL-8-1).
+PARTIAL_TARGETS = "partial_targets"
 NOT_ENOUGH_DATA = "not_enough_data"
 TOO_FEW_NETWORKS = "too_few_networks"
 # The overall's status when the network has no ranked target for the engine.
 NO_RANKED_TARGETS = "no_ranked_targets"
 # The metrics with an overall over every target: `<metric>_overall` (CHALLENGE-OVERALL-1).
-OVERALL_METRICS = ("success", "challenge")
-# The targets scored on success alone, from the HTTP metrics; their weight in success_overall
+OVERALL_METRICS = ("challenge",)
+# The targets scored on success alone, from the HTTP metrics; their weight in challenge_overall
 # is the methodology's [http_difficulty].
 HTTP_TARGETS = tuple(HTTP_DIFFICULTY)
 
@@ -133,11 +169,19 @@ def score_networks(networks, config):
     difficulty, groups = browser_difficulty(config), config.get("target_groups", {})
     for peers in kinds.values():
         score(peers, difficulty, groups, http_difficulty(config), browser_min_requests(config))
+        by_label = defaultdict(list)
+        for entry in peers:
+            for label, window in entry["windows"].items():
+                by_label[label].append(window)
+        settings, weights = success_score(config), card_weights(config)
+        for windows in by_label.values():
+            success_overall(windows, settings, weights)
+            point_overall(windows, settings, weights)
 
 
 def score_days(networks, config):
     """Each network's `days` scored (see the module): [{"start", "success_overall"}], the
-    success_overall {score, rank, ranked_of, status, targets} or null on a day with no target."""
+    success_overall {score, rank, ranked_of, status, targets}."""
     peers = [{"kind": n["kind"], "windows": {d["start"]: d for d in n["days"]}} for n in networks]
     score_networks(peers, config)
     for entry in networks:
@@ -147,6 +191,63 @@ def score_days(networks, config):
             found = {k: v for k, v in found.items() if k != "weights"} if found else None
             days.append({"start": day["start"], "success_overall": found})
         entry["days"] = days
+
+
+def success_overall(windows, settings, weights):
+    """Each window's `success_overall` from its "_success" (card_success.counts(), removed), the
+    windows one label of one kind (see the module); settings: policy.success_score()'s {basis,
+    slope, floor}; weights: card_success.weights()."""
+    rates = defaultdict(dict)
+    for i, window in enumerate(windows):
+        for target, (completed, successes) in window.pop("_success", {}).items():
+            if completed and target in weights:
+                rates[target][i] = successes / completed
+    best = {target: max(found.values()) for target, found in rates.items()}
+    slope, floor = settings["slope"], settings["floor"]
+    found = []
+    for i, window in enumerate(windows):
+        own = {
+            t: max(floor, 10 - slope * 100 * (best[t] - rates[t][i]))
+            for t in weights
+            if i in rates.get(t, {})
+        }
+        used = {t: weights[t] for t in own}
+        value = sum(own[t] * used[t] for t in own) / sum(used.values()) if own else None
+        missing = [t for t in weights if t not in own]
+        status = (PARTIAL_TARGETS if missing else RANKED) if own else NO_RANKED_TARGETS
+        overall = {"score": value, "rank": None, "ranked_of": None, "status": status}
+        overall |= {"targets": own, "weights": used, "missing_targets": missing}
+        window["success_overall"] = overall | {"basis": settings["basis"]}
+        if own:
+            found.append(window["success_overall"])
+    top = max((s["score"] for s in found), default=None)
+    for s in found:  # the best network reads 10, the others keep their distance below it
+        s["score"] = 10.0 if s["score"] == top else s["score"] + 10 - top
+    _rank(found)
+
+
+def point_overall(windows, settings, weights):
+    """Each series point's `success_score` {score, status} of windows (one label of one kind):
+    its "_success" (network.point_trailing(), removed) scored by success_overall() among the
+    windows' points of the same time, so a point is the window's Success x/10 over the trailing
+    window ending at it, its best network the kind's best over it (SUCCESS-POINTS-1). A point
+    holding less than one whole day of the network's data ("_short") is null with
+    not_enough_data and does not count for the best (SUCCESS-FULL-DAY-1). A window without a
+    series (a day of score_days()) has none."""
+    at, seen = defaultdict(list), set()
+    for window in windows:
+        for point in window.get("series", ()):
+            if "_success" in point and id(point) not in seen:  # a point two windows share: once
+                seen.add(id(point))
+                at[point["at"]].append(point)
+    for points in at.values():
+        success_overall(points, settings, weights)
+        for point in points:
+            short = point.pop("_short", False)  # less than a day of data: empty, never 1.0
+            if found := point.pop("success_overall", None):
+                score = {"score": found["score"], "status": found["status"]}
+                empty = {"score": None, "status": NOT_ENOUGH_DATA}
+                point["success_score"] = empty if short else score
 
 
 def _target_scores(windows, minimum):
@@ -311,16 +412,18 @@ def _metric_overall(windows, weights, metric):
 
 def previous_scores(networks, previous, as_of):
     """Each network window's `previous_score` of success_overall and of each target's success
-    score (see the module), from parts.previous()'s windows' `success` ({"overall", "targets":
-    {id: score}}); null without a previous build, one newer than as_of, or that score."""
+    score (see the module), from parts.previous()'s windows' `success` ({"overall", "basis",
+    "targets": {id: score}}); null without a previous build, one newer than as_of, or that score,
+    and the overall's null on another basis."""
     old = {}
     if previous and datetime.fromisoformat(previous["as_of"]) <= as_of:
         old = {n["id"]: n["windows"] for n in previous["networks"]}
     for entry in networks:
         for label, w in entry["windows"].items():
             found = old.get(entry["id"], {}).get(label, {}).get("success") or {}
-            if "success_overall" in w:
-                w["success_overall"]["previous_score"] = found.get("overall")
+            if own := w.get("success_overall"):  # never across two rules (SUCCESS-ALL-8-1)
+                same = found.get("basis") == own.get("basis")
+                own["previous_score"] = found.get("overall") if same else None
             before = found.get("targets") or {}
             for target, own in w["targets"].items():
                 scores = own["browser"].get("scores") if "browser" in own else own.get("scores")

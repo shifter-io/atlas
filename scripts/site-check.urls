@@ -1,0 +1,31 @@
+# The website's URL list for scripts/site-check.sh: the one place to update when the website
+# starts or stops requesting a URL. One URL per line: "api <path>" is requested on the API base
+# (and must answer 200 + valid JSON), "site <path>" on the --site base (200 without the text
+# "temporarily unavailable"). Placeholders: {range} = each range argument, {slug} = each network
+# of /v1/networks, {first-slug} = the first of them in sorted order. Blank lines and lines
+# starting with # are ignored. Keep the exact URL forms the website uses (query order included):
+# a redirect on one of them is what the check looks for.
+
+api /v1/home
+api /v1/rankings
+api /v1/targets
+api /v1/overlap
+api /v1/meta
+api /v1/networks
+api /v1/events?limit=500
+api /v1/changelog
+api /v1/version
+api /v1/rankings?range={range}
+api /v1/overlap?range={range}
+api /v1/home?range={range}
+api /v1/networks/{slug}
+api /v1/networks/{slug}/chart
+api /v1/networks/{slug}/pricing-history
+api /v1/networks/{slug}/coverage?range={range}&page=1
+api /v1/networks/{slug}/chart?range={range}
+
+site /atlas
+site /atlas/networks
+site /atlas/networks/{first-slug}
+site /atlas/true-cost
+site /de/atlas

@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // /v1/home?range= (api/answers/home.md): the Atlas home's live
@@ -29,12 +29,6 @@ func init() {
 			return homePath(rangeID), err
 		}})
 }
-
-// Point counts of the old site's home sparklines (export-home.mts).
-const (
-	homeCurve24h     = 84 // a network's 24h score curve; other ranges keep every point
-	homeNetworkSpark = 22
-)
 
 // Decimals of the home chart series (HOME-SIZE-1, #905): they are drawn, not
 // read as figures, so they are rounded for room under MaxAnswerBytes. Rates
@@ -91,18 +85,23 @@ type HomeMarket struct {
 	ObservedDays Num `json:"observedDays"`
 	Networks     int `json:"networks"`
 	Targets      int `json:"targets"`
-	// SuccessScoreCurve is the fleet success history (the measured view's
-	// headline spark) on the 1-10 scale (scoreCurve); the rates stay
-	// internal (SUCCESS-CURVE-1, #1072).
+	// SuccessScoreCurve is the fleet's success history pooled by requests
+	// per UTC hour (24h) or day (7d, 30d; fleetCurve, CURVE-HOURLY-DAILY-1)
+	// on the 1-10 scale (scoreCurve); the rates stay internal
+	// (SUCCESS-CURVE-1, #1072).
 	SuccessScoreCurve SparkSeries `json:"successScoreCurve"`
 	MedianSuccess     Num         `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
 	// SuccessScore is MedianSuccess on the 1-10 scale (marketScore).
-	SuccessScore  MarketScore `json:"successScore"`
-	UniqueIps     Num         `json:"uniqueIps"`
-	BandwidthGb   Num         `json:"bandwidthGb"`
-	MedianLatency Num         `json:"medianLatency"`
-	LatencySpark  SparkSeries `json:"latencySpark"`
-	SuccessSpark  SparkSeries `json:"-"` // internal (#900)
+	SuccessScore MarketScore `json:"successScore"`
+	UniqueIps    Num         `json:"uniqueIps"`
+	// UniqueIpsCurve is the fleet's distinct exit IPs at each UTC hour over
+	// the trailing 24 hours (24h) or per UTC day (7d, 30d), each IP once
+	// across networks, an unfinished last day flagged (uniqueIpsCurve).
+	UniqueIpsCurve UniqueIpsSeries `json:"uniqueIpsCurve"`
+	BandwidthGb    Num             `json:"bandwidthGb"`
+	MedianLatency  Num             `json:"medianLatency"`
+	LatencySpark   SparkSeries     `json:"latencySpark"`
+	SuccessSpark   SparkSeries     `json:"-"` // internal (#900)
 	// SuccessScoreSpark is SuccessSpark on the 1-10 scale (marketScoreSpark),
 	// with its times; SuccessScoreDelta the history's change on that scale.
 	SuccessScoreSpark MarketScoreSeries `json:"successScoreSpark"`
@@ -132,48 +131,58 @@ type HomeSeries struct {
 // HomeNetwork is one network's panel: its ranking row's figures for the
 // range, plus its score curve and sparks.
 type HomeNetwork struct {
-	Slug               string                     `json:"slug"`
-	Name               string                     `json:"name"`
-	Kind               string                     `json:"kind"`
-	Standing           Standing                   `json:"standing"`
-	Score              Num                        `json:"score"`
-	Grade              model.Str                  `json:"grade"`
-	Breakdown          model.Breakdown            `json:"breakdown"`
-	Requests           Num                        `json:"requests"`
-	BandwidthGb        Num                        `json:"bandwidthGb"`
-	ObservedDays       Num                        `json:"observedDays"`
-	SuccessRate        Num                        `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
-	SuccessDeltaPts    Num                        `json:"-"` // internal (#900): successScoreDelta is served
-	LatencyP50         Num                        `json:"latencyP50"`
-	LatencyP90         Num                        `json:"latencyP90"`
-	LatencyP99         Num                        `json:"latencyP99"`
-	LightLatencyP50    Num                        `json:"lightLatencyP50"`
-	LatencyDeltaPct    Num                        `json:"latencyDeltaPct"`
-	UniqueIps          Num                        `json:"uniqueIps"`
-	Countries          Num                        `json:"countries"`
-	Cities             Num                        `json:"cities"`
-	ListRate           Num                        `json:"listRate"`
-	Claimed            Num                        `json:"claimed"`
-	ClaimShare         Num                        `json:"claimShare"`
-	Authenticity       Num                        `json:"authenticity"`
-	DatacenterAsnShare Num                        `json:"datacenterAsnShare"`
-	DatacenterIps      Num                        `json:"datacenterIps"`
-	Incidents          Num                        `json:"incidents"`
-	BrowserOverall     map[string]RowBrowserScore `json:"browserOverall"`
+	Slug                string                     `json:"slug"`
+	Name                string                     `json:"name"`
+	Kind                string                     `json:"kind"`
+	Standing            Standing                   `json:"standing"`
+	Score               Num                        `json:"score"`
+	Grade               model.Str                  `json:"grade"`
+	Breakdown           model.Breakdown            `json:"breakdown"`
+	Requests            Num                        `json:"requests"`
+	BandwidthGb         Num                        `json:"bandwidthGb"`
+	ObservedDays        Num                        `json:"observedDays"`
+	SuccessRate         Num                        `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
+	SuccessDeltaPts     Num                        `json:"-"` // internal (#900): successScoreDelta is served
+	LatencyP50          Num                        `json:"latencyP50"`
+	LatencyP90          Num                        `json:"latencyP90"`
+	LatencyP99          Num                        `json:"latencyP99"`
+	LightLatencyP50     Num                        `json:"lightLatencyP50"`
+	UnderLoadLatencyP50 Num                        `json:"underLoadLatencyP50"` // display only (WindowFigures)
+	LatencyDeltaPct     Num                        `json:"latencyDeltaPct"`
+	BasketCovered       Num                        `json:"latencyBasketCovered"` // the ranking row's (LATENCY-BASKET-1)
+	BasketSize          Num                        `json:"latencyBasketSize"`
+	LatencyDeltaBasis   model.Str                  `json:"latencyDeltaBasis"`
+	LatencyDeltaAsOf    model.Str                  `json:"latencyDeltaAsOf"`
+	UniqueIps           Num                        `json:"uniqueIps"`
+	Countries           Num                        `json:"countries"`
+	Cities              Num                        `json:"cities"`
+	ListRate            Num                        `json:"listRate"`
+	Claimed             Num                        `json:"claimed"`
+	ClaimShare          Num                        `json:"claimShare"`
+	Authenticity        Num                        `json:"authenticity"`
+	DatacenterAsnShare  Num                        `json:"datacenterAsnShare"`
+	DatacenterIps       Num                        `json:"datacenterIps"`
+	Incidents           Num                        `json:"incidents"`
+	BrowserOverall      map[string]RowBrowserScore `json:"browserOverall"`
 	// ValueRankAllTargets is the ranking row's (VALUE-ALL-RANK-1).
 	ValueRankAllTargets *int `json:"valueRankAllTargets"`
 	// SuccessScore is the ranking row's without its targets and weights
 	// (the network page and /v1/targets serve them): the answer's room.
 	SuccessScore      *model.MetricScore `json:"successScore"`
 	SuccessScoreDelta Num                `json:"successScoreDelta"`
-	// SuccessScoreCurve is the success history on the range's curve grid,
-	// each point on the 1-10 scale (scoreCurve; SUCCESS-CURVE-1, #1072).
+	// SuccessScoreCurve is the success history per UTC hour or day of the
+	// range's curve axis, weighted by requests (networkCurve,
+	// CURVE-HOURLY-DAILY-1), each point on the 1-10 scale (scoreCurve;
+	// SUCCESS-CURVE-1, #1072).
 	SuccessScoreCurve HomeSeries `json:"successScoreCurve"`
 	LatencySpark      HomeSeries `json:"latencySpark"`
 	SuccessSpark      HomeSeries `json:"-"` // internal (#900): successScoreSpark is served
 	// SuccessScoreSpark is each SuccessSpark point's 1-10 score among the
-	// home's networks of the kind at that point (homePointScores).
+	// window's Success x/10 rule over the daily tests of the trailing window ending at that hour or day (axisScores).
 	SuccessScoreSpark HomeScoreSeries `json:"successScoreSpark"`
+	// AtlasScoreSpark is the ranking row's Atlas Score trend, its times in
+	// the answer's Times (ATLAS-SCORE-SPARK-1).
+	AtlasScoreSpark HomeScoreSeries `json:"atlasScoreSpark"`
 	NAList
 }
 
@@ -199,13 +208,13 @@ func buildHome(c *Context) (map[string]any, error) {
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
 		ans.Market.SpreadAll = homeSpreadAll(ans.Insights.ValueAll)
-		scores := homePointScores(rows.Networks, byslug, c.Stats, r.ID)
-		hists := homeHistories(rows.Networks, byslug, c.Stats, r.ID)
-		grid := curveGrid(hists, r)
+		asOf, ok := curveAsOf(fleet, c.Dataset, r.ID)
+		axis := newCurveAxis(asOf, ok, r)
+		ans.marketSeries(fleet, c.Stats, axis, r.ID)
+		hists := homeHistories(rows.Networks, byslug, c.Stats, r.ID, asOf)
 		for j, row := range rows.Networks {
-			n := ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], hists[j], grid)
-			n.SuccessScoreSpark = scoreSpark(scores[row.Slug], homeNetworkSpark, n.SuccessSpark)
-			n.SuccessScoreSpark.Values = roundedValues(n.SuccessScoreSpark.Values, homeScoreDecimals)
+			n := ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], hists[j], axis)
+			n.SuccessScoreSpark = HomeScoreSeries{ScoreSeries: scoreSeries(axisScores(hists[j], axis)), TimesIndex: n.SuccessScoreCurve.TimesIndex}
 			ans.Networks = append(ans.Networks, n)
 		}
 		if err := ans.listNA(rows.Networks); err != nil {
@@ -251,14 +260,11 @@ func entriesBySlug(entries []*entry) map[string]*entry {
 // once over every product group).
 func homeMarket(c *Context, fleet []*entry, v *FleetView, rangeID string) HomeMarket {
 	m := HomeMarket{Requests: nan, UniqueIps: nan, Countries: nan, Targets: targetCounts(c.Dataset.Targets).Measured, Networks: len(fleet),
-		SuccessScoreCurve: scoreCurve(v.HeadlineSpark), MedianSuccess: v.Fleet.MedianSuccessRate, BandwidthGb: v.Fleet.BandwidthGb,
-		MedianLatency: v.Fleet.MedianLatency, LatencySpark: v.LatencySpark, SuccessSpark: v.SuccessSpark,
-		ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID)}
+		MedianSuccess: v.Fleet.MedianSuccessRate, BandwidthGb: v.Fleet.BandwidthGb,
+		MedianLatency: v.Fleet.MedianLatency, ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID),
+		UniqueIpsCurve: uniqueIpsCurve(c.Snapshot, rangeID)}
 	m.SuccessScore = marketScore(m.MedianSuccess)
-	m.SuccessScoreSpark, m.SuccessScoreDelta = marketScoreSpark(m.SuccessSpark), marketScoreDelta(v.Fleet.Success)
-	// The score spark is computed from the unrounded rates.
-	m.SuccessSpark = roundedSeries(m.SuccessSpark, homeRateDecimals)
-	m.LatencySpark = roundedSeries(m.LatencySpark, homeLatencyDecimals)
+	m.SuccessScoreDelta = marketScoreDelta(v.Fleet.Success)
 	if all := c.Pages.Network[AllNetworks+"/"+AllNetworks]; all != nil && all.Ranges[rangeID] != nil {
 		t := all.Ranges[rangeID]
 		m.Requests, m.UniqueIps, m.Countries = t.Requests, t.UniqueIps, Num(t.ExitCountries)
@@ -322,16 +328,18 @@ func poolShares(fleet []*entry, stats map[string]map[string]*WindowStats, rangeI
 	return ratio(Num(geo), Num(ips)), ratio(Num(dc), Num(dcIps)), incidents
 }
 
-// network is a ranking row's panel, with its score curve on the range's grid and
+// network is a ranking row's panel, with its score curve on the range's axis and
 // its sparks from h (empty for a row without an entry).
-func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHistory, grid []Num) HomeNetwork {
+func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHistory, axis curveAxis) HomeNetwork {
 	n := HomeNetwork{Slug: row.Slug, Name: row.Name, Kind: row.Kind, Standing: row.Standing, Score: row.Score, Grade: row.Grade,
 		Breakdown: row.Breakdown, Requests: row.Requests, BandwidthGb: row.BandwidthGb,
 		ObservedDays: row.ObservedDays, SuccessRate: row.SuccessRate, SuccessDeltaPts: row.SuccessDelta,
 		LatencyP50: row.LatencyP50, LatencyP90: row.LatencyP90, LatencyP99: row.LatencyP99, LatencyDeltaPct: row.LatencyDelta,
+		BasketCovered: row.LatencyBasketCovered, BasketSize: row.LatencyBasketSize,
+		LatencyDeltaBasis: row.LatencyBasis, LatencyDeltaAsOf: row.LatencyAsOf,
 		UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
 		ListRate: row.ListRate, ValueRankAllTargets: row.ValueRankAllTargets, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
-		DatacenterAsnShare: row.DatacenterAsnShare, DatacenterIps: row.DatacenterIps, Incidents: nan, LightLatencyP50: nan, BrowserOverall: row.BrowserOverall,
+		DatacenterAsnShare: row.DatacenterAsnShare, DatacenterIps: row.DatacenterIps, Incidents: nan, LightLatencyP50: nan, UnderLoadLatencyP50: row.UnderLoadLatencyP50, BrowserOverall: row.BrowserOverall,
 		SuccessScore: metricOf(row.SuccessScore), SuccessScoreDelta: row.SuccessScoreDelta}
 	if s != nil {
 		n.Incidents, n.LightLatencyP50 = s.IncidentCount, s.LightLatencyP50
@@ -340,9 +348,11 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHis
 		n.Claimed = e.P.Pool.ClaimedPoolSize
 		n.ClaimShare = ratio(row.UniqueIps, n.Claimed)
 	}
-	n.SuccessScoreCurve = a.series(scoreCurve(gridSeries(h.success, grid)))
-	n.SuccessSpark = a.series(roundedSeries(sparkSeries(h.success, homeNetworkSpark), homeRateDecimals))
-	n.LatencySpark = a.series(roundedSeries(sparkSeries(h.latency, homeNetworkSpark), homeLatencyDecimals))
+	rates := networkCurve(h.curve, axis)
+	n.SuccessScoreCurve = a.series(scoreCurve(rates))
+	n.SuccessSpark = a.series(roundedSeries(rates, homeRateDecimals))
+	n.LatencySpark = a.series(roundedSeries(latencySpark(h.latency, axis), homeLatencyDecimals))
+	n.AtlasScoreSpark = a.atlasSpark(row)
 	return n
 }
 

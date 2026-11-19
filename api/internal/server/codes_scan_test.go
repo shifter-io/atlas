@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // The codes scan (CODES-CATALOG-1): every value at a registered code set's
@@ -27,6 +27,8 @@ var codesUnscanned = map[string]string{
 	"changelog[].":         "the scan build has no change in any range",
 	"profiles[].":          "the scan build has no ranking profile row",
 	"bands[].":             "the scan build has no outage in any window",
+	"requestedCountryStatus[].": "the scan build's snapshot predates country_verdicts (COUNTRY-MIN-IPS-1); " +
+		"TestRequestedCountryStatusMergesTheGroups checks the codes",
 }
 
 // bodyRoutes name a scanned body's route by its stored path or request: the

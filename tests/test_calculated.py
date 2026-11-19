@@ -9,7 +9,7 @@ from calculated_cases import EDGE, MINUTE, POLICY, spread
 from test_storage import measurement
 
 from atlas.calculated import store, store_retention
-from atlas.calculated.aggregate import metrics, target_score
+from atlas.calculated.aggregate import LIGHT_CENSUS, LIGHT_NONE, metrics, target_score
 from atlas.calculated.api import app
 from atlas.calculated.calculator import calculate, retain
 from atlas.calculated.policy import composite, digest, effective, load, ratio
@@ -78,18 +78,30 @@ def test_policy_and_eligibility():
     assert target_score(m, c)["state"] == "incomplete"
     m["coverage"] = 1
     s = target_score(m, c)
-    # Raw values; peer_scores() turns them into ratios to the leader. Speed is the p50 under
-    # load, not the light-load p50.
+    # Raw values; peer_scores() turns them into ratios to the leader. Speed is the light-load
+    # (pulse) p50, not the p50 under load (SPEED-PULSE-1).
+    assert c["speed_latency"] == "light_load"
     assert s["state"] == "ready" and s["weights"] == c["target_weights"]
     assert {k: v["value"] for k, v in s["components"].items()} == {
         "reliability": 0.9994,
-        "speed": 1670,
+        "speed": 1113,
     }
-    # Without a load test there is no speed value, and the reason says why.
+    # Without a load test the speed is unchanged: under load is display only.
     m["latency_under_load_ms"] = {"p50": None}
     m["under_load"] = {"reason": "No load test in this window"}
+    assert target_score(m, c)["components"]["speed"]["value"] == 1113
+    # Without enough pulses there is no speed value, and the reason says why.
+    m["latency_ms"] = {"p50": None}
     speed = target_score(m, c)["components"]["speed"]
+    assert speed["value"] is None and speed["reason"] == LIGHT_NONE
+    m["latency_reason"] = LIGHT_CENSUS
+    assert target_score(m, c)["components"]["speed"]["reason"] == LIGHT_CENSUS
+    # The old rule stays selectable: speed_latency = "under_load" reads the p50 under load.
+    old = c | {"speed_latency": "under_load"}
+    speed = target_score(m, old)["components"]["speed"]
     assert speed["value"] is None and speed["reason"] == "No load test in this window"
+    m["latency_under_load_ms"] = {"p50": 1670}
+    assert target_score(m, old)["components"]["speed"]["value"] == 1670
     assert [ratio(0.5, 0.8, True), ratio(0.8, 0.8, True), ratio(0.5, 0, True)] == [62.5, 100, 0]
     assert [ratio(200, 100, False), ratio(0, 100, False), ratio(None, 1, True)] == [50, 100, None]
 
@@ -157,7 +169,7 @@ async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
         == distinct
         < sum(p["windows"]["24h"]["pool"]["unique_ips"] for p in second["products"])
     )
-    assert len(day["series"]) == 288
+    assert len(day["series"]) == 24  # one point per UTC hour (#1301)
     assert sum(r["completed"] for r in day["series"]) == 20
     assert max(r["unique_ips"] or 0 for r in day["series"]) <= day["unique_ips"]
     assert [r["at"] for r in totals["30d"]["series"]] == [

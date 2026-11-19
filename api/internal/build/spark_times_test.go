@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // checkTimes fails unless times has one entry per value, each in minutes,

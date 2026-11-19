@@ -62,16 +62,11 @@ async def test_snapshot_v2_breakdowns_uptime_census_and_traffic(database, tmp_pa
     }
     assert m["uptime"] == 0.75
     assert scheduled["windows"]["7d"]["uptime"]["value"] == pytest.approx(1 - 6 / 168)
-    # Daily availability uses the actual monitoring/outage day, with older days N/A.
-    assert [point["uptime"] for point in scheduled["windows"]["7d"]["series"]] == [
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        0.75,
-    ]
+    # Daily availability per UTC day (#1301): the days before the monitoring are N/A; today
+    # (partial) holds the outage, so it is below 1.
+    days = [point["uptime"] for point in scheduled["windows"]["7d"]["series"]]
+    assert len(days) == 7 and days[:5] == [None] * 5
+    assert days[6] is not None and days[6] < 1
     with connect(database) as conn:
         stored = conn.execute(
             "SELECT s.uptime FROM calculated_series s JOIN calculated_windows w USING(result_id) "

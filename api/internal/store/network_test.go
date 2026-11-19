@@ -8,8 +8,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
 	"github.com/jackc/pgx/v5"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 func ptr(s string) *string { return &s }

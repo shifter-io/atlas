@@ -60,6 +60,23 @@ def test_on_failure_posts_could_not_restart_for_the_units_environment(server: Se
     assert "atlas-staging-orchestrator.service: recovered" in text
 
 
+def test_a_failed_hour_unit_posts_one_short_line_without_its_journal(server: Server) -> None:
+    """PULSE-STATE-1: a pulse hour (or hourly test) unit's failure is one line, posted once,
+    whether OnFailure= or the check sees it first; never its journal's JSON summary."""
+    pulse = "atlas-pulse-20261115T11.service"
+    server.run("failed", pulse)
+    server.unit(pulse, active="failed", filestate="transient", result="exit-code")
+    assert server.check() == []  # posted once
+    [text] = server.posts()
+    detail = f"the pulse hour stopped with an error (journalctl --user -u {pulse})"
+    assert text == f"{HEAD}{pulse}: check failed: {detail}"
+    hourly = "atlas-hourly-20261115T11.service"
+    server.unit(hourly, active="failed", filestate="transient", result="exit-code")
+    [text] = server.check()
+    assert "```" not in text
+    assert text.endswith(f"the hourly test failed (journalctl --user -u {hourly})")
+
+
 def test_disk_threshold(server: Server) -> None:
     server.set("disk", "85")
     assert server.check() == []
@@ -224,7 +241,33 @@ def test_install_writes_units_and_drop_ins_and_is_idempotent(tmp_path: Path) -> 
     assert {p: p.stat().st_mtime_ns for p in units.rglob("*") if p.is_file()} == times
     assert ["systemctl", "--user", "daemon-reload"] not in server.argv()
     server.run("test", "production")
-    assert server.posts()[-1] == "Atlas production: alerts installed on canada-test"
+    assert server.posts()[-1] == "Atlas production: alerts test from canada-test"
+
+
+def test_only_the_first_install_on_a_machine_posts_and_test_posts_on_demand(
+    tmp_path: Path,
+) -> None:
+    """Every deploy installs the alerts again (server-setup.sh): Slack hears of the first only."""
+    server = Server(tmp_path)
+    server.run("install", "production")
+    assert server.posts() == ["Atlas production: alerts installed on canada-test"]
+    for _ in range(2):  # later deploys and updates
+        result = server.run("install", "production")
+        assert "no Slack post" in result.stdout
+    assert server.posts() == ["Atlas production: alerts installed on canada-test"]
+    server.run("test", "production")
+    assert server.posts()[1:] == ["Atlas production: alerts test from canada-test"]
+    server.run("install", "staging")  # another environment's first install posts once too
+    assert server.posts()[-1] == "Atlas staging: alerts installed on canada-test"
+
+
+def test_a_failed_first_post_is_sent_by_the_next_install(tmp_path: Path) -> None:
+    server = Server(tmp_path)
+    server.set("slack-down", "")
+    assert server.run("install", "production", check=False).returncode != 0
+    server.set("slack-down", None)
+    server.run("install", "production")
+    assert server.posts() == ["Atlas production: alerts installed on canada-test"]
 
 
 def test_install_refuses_root(tmp_path: Path) -> None:
@@ -265,7 +308,7 @@ def test_a_real_curl_posts_json_to_a_local_receiver(tmp_path: Path) -> None:
         httpd.shutdown()
     [(path, ctype, body)] = received
     assert path == f"/services/{TOKEN}" and ctype == "application/json"
-    assert json.loads(body) == {"text": "Atlas staging: alerts installed on canada-test"}
+    assert json.loads(body) == {"text": "Atlas staging: alerts test from canada-test"}
 
 
 def test_manager_alerts_are_read_with_the_managers_login(server: Server) -> None:
@@ -290,3 +333,97 @@ def test_no_manager_login_reads_no_alerts(server: Server) -> None:
     server.check()
     envs = [json.loads(line) for line in (server.fake / "psql-env.jsonl").read_text().splitlines()]
     assert envs and not any("alerts" in e["query"] for e in envs)
+
+
+# --- the alert router (ALERT-POLICY-1, #1297) ---------------------------------------------------
+
+
+def live(server: Server) -> None:
+    (server.home / ".config" / "atlas" / "alert-router").write_text("live\n")
+
+
+def manager(server: Server) -> None:
+    server.database()
+    server.unit("atlas-orchestrator.service", ActiveEnterTimestamp="@1")
+    server.set("tls-8443", "")
+    server.set("tls-8444", "")
+
+
+def dry_run(server: Server) -> list[dict]:
+    path = server.home / "atlas" / "production" / "alerts-state" / "router-dry-run.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def test_dry_run_keeps_the_old_posts_and_records_the_routers(server: Server) -> None:
+    server.set("disk", "86")
+    assert server.check() == [HEAD + "disk: check failed: the home file system is 86% full"]
+    assert dry_run(server) == []  # within its grace
+    server.now += 15 * 60
+    assert server.check() == []
+    [page] = dry_run(server)
+    assert page["kind"] == "page" and page["text"].startswith(HEAD + "disk: check failed: ")
+    server.set("disk", "50")
+    assert server.check() == [HEAD + "disk: recovered: ok again"]
+    assert dry_run(server)[1]["kind"] == "followup" and dry_run(server)[1]["thread"]
+
+
+def test_live_a_problem_that_heals_within_its_grace_posts_nothing(server: Server) -> None:
+    live(server)
+    server.set("disk", "86")
+    assert server.check() == []
+    server.now += 10 * 60
+    server.set("disk", "50")
+    assert server.check() == []
+    server.set("disk", "86")
+    assert server.check() == []
+    server.now += 15 * 60
+    [text] = server.check()
+    assert text.startswith(HEAD + "disk: check failed: the home file system is 86% full\n")
+    server.set("disk", "50")
+    [text] = server.check()
+    assert text.startswith("Atlas production on canada-test: disk: recovered at ")
+
+
+def test_live_login_refused_pages_at_once_and_a_budgeted_gap_never(server: Server) -> None:
+    live(server)
+    manager(server)
+    rows = (
+        f"proxy_login_refused:proxyempire\tproxy_login_refused\t2\t{T0 - 60}\t"
+        "proxyempire refused our login (HTTP 407)\n"
+        f"pulse_runs_open:20261116T22:proxy-cheap/lon1\tpulse_runs_open\t2\t{T0 - 3600}\t"
+        "1 country pulse of proxy-cheap in London was not measured\n"
+    )
+    server.set("open-alerts", rows)
+    [text] = server.check()
+    assert text.startswith(HEAD + "manager alert: proxyempire refused our login (HTTP 407)")
+    server.set("open-alerts", "")  # acknowledged: the network was resumed
+    [text] = server.check()
+    assert "manager alert: recovered at " in text
+
+
+def test_live_a_network_down_for_30_minutes_pages_and_recovers(server: Server) -> None:
+    live(server)
+    manager(server)
+    server.set("outages", f"proxy-cheap residential\t129\t{T0 - 20 * 60}\n")
+    assert server.check() == []
+    server.now += 10 * 60
+    [text] = server.check()
+    assert text.startswith(HEAD + "network proxy-cheap residential: network down: down in 129")
+    server.set("outages", "")
+    [text] = server.check()
+    assert "network proxy-cheap residential: recovered at" in text
+
+
+def test_live_a_broken_router_is_posted_once(server: Server) -> None:
+    live(server)
+    state = server.home / "atlas" / "production" / "alerts-state"
+    (state / "router.json").write_text("not json")
+    result = server.run("check", "production", check=False)
+    assert result.returncode == 1 and "alert router" in result.stderr
+    [text] = server.posts()
+    assert text.startswith(HEAD + "the alert router failed, alerts may be missing: ")
+    server.run("check", "production", check=False)
+    assert len(server.posts()) == 1
+    (state / "router.json").unlink()
+    server.check()
+    assert not (state / "router.down").exists()

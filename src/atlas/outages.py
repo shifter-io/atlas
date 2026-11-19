@@ -1,11 +1,13 @@
-"""Outages and the incident helpers detect() uses to open and close them.
+"""Outages and the incident helpers detect() uses to open and close them, and the series' baseline
+and incident lookups it judges a pulse against.
 
 Outages (the `outages` table) are the time a product was down in a country. A pulse 'down'
-opens one (from its last healthy pulse there) and the pulse 'recovered' that ends the incident
-closes it (at the start of that healthy batch). A provider that is down shows as a done pulse
-run without a success: that is data, not a gap. A run is only ever 'failed' by our side (no
-node, never started, went silent, node shut down or erred, upload rejected), so failed runs are
-never judged. Load batches (latency under load) never open or close an outage.
+opens one (from its last healthy observation there: _outage_start) and the pulse 'recovered'
+that ends the incident closes it (at the start of that healthy batch). A provider that is
+down shows as a done pulse run without a success: that is data, not a gap. A run is only ever
+'failed' by our side (no node, never started, went silent, node shut down or erred, upload
+rejected), so failed runs are never judged.
+Load batches (latency under load) never open or close an outage.
 A census that stalled opens one in the orchestrator (orchestrator.batches.census_down); any
 later healthy pulse in the country closes it in detect, with a 'recovered' event of source 'census'.
 """
@@ -13,6 +15,9 @@ later healthy pulse in the country closes it in detect, with a 'recovered' event
 from __future__ import annotations
 
 from datetime import timedelta
+
+from . import proxy_login, pulse_no_exit, verdicts
+from .daily import DAILY, MARKER
 
 # Incidents that stay open until a later pulse of the same series is healthy again.
 INCIDENTS = ("down", "success_drop")
@@ -66,6 +71,61 @@ OTHER_TARGET_SQL = (
 )
 
 
+# The product's observations in the country before a pulse slot: each target's done pulse
+# and each completed daily test, whether it got any success, its slot (a daily test's start),
+# when it began and when it finished. Of these: when the last healthy one finished, and the
+# slot and start of the first failing one after it.
+OBSERVATIONS_SQL = (
+    "WITH o AS (SELECT br.successes>0 AS healthy,b.scheduled_for AS slot,"
+    "coalesce(b.started_at,b.start_at) AS began,"
+    "coalesce(r.finished_at,br.finished_at,b.finished_at) AS finished "
+    "FROM batch_runs br JOIN test_batches b USING(batch_id) "
+    "LEFT JOIN test_runs r ON r.run_key=br.run_key "
+    "WHERE b.kind='pulse' AND b.country_code=%(country)s AND br.product_id=%(product)s "
+    "AND br.status='done' AND b.scheduled_for<%(slot)s AND b.scheduled_for>=%(floor)s "
+    "UNION ALL SELECT (r.summary->>'successes')::bigint>0,r.started_at,r.started_at,r.finished_at "
+    "FROM test_runs r JOIN scope_stats s ON s.scope_id=r.scope_id "
+    "JOIN pool_stats p ON p.pool_id=s.pool_id WHERE s.product_id=%(product)s "
+    "AND upper(p.requested_country)=%(country)s AND r.summary->>%(marker)s=%(daily)s "
+    "AND r.status='completed' AND r.started_at<%(start)s AND r.finished_at>=%(floor)s), "
+    "h AS (SELECT max(finished) AS at FROM o WHERE healthy) "
+    "SELECT h.at AS healthy,f.slot,f.began FROM h LEFT JOIN LATERAL (SELECT slot,began FROM o "
+    "WHERE NOT healthy AND slot>h.at ORDER BY slot,began LIMIT 1) f ON true"
+)
+
+
+def _outage_start(cur, batch, product):
+    """When the product's outage in the country starts, for this batch's pulse 'down'.
+
+    It starts when its last healthy observation there finished (a pulse of any target, or a
+    daily test, with a success), or at this batch's start without one in the last
+    INCIDENT_TTL. When nothing at all was observed for more than a pulse interval after that
+    healthy one (the country was not pulsed for hours or days), the time without data is not
+    the outage: it starts with the first failing observation (OUTAGE-START-1)."""
+    start = _batch_start(batch)
+    row = cur.execute(
+        OBSERVATIONS_SQL,
+        {
+            "country": batch["country_code"],
+            "product": product,
+            "slot": batch["scheduled_for"],
+            "start": start,
+            "floor": start - INCIDENT_TTL,
+            "marker": MARKER,
+            "daily": DAILY,
+        },
+    ).fetchone()
+    healthy = row["healthy"]
+    if healthy is None:
+        return start
+    slot, began = (row["slot"], row["began"]) if row["slot"] else (batch["scheduled_for"], start)
+    interval = cur.execute(
+        "SELECT pulse_interval_minutes FROM targets WHERE target_id=%s", (batch["target_id"],)
+    ).fetchone()["pulse_interval_minutes"]
+    since = began if slot - healthy > timedelta(minutes=interval) else healthy
+    return min(since, start)
+
+
 def _open_outage(cur, batch, product):
     """A pulse 'down' opens an outage, unless the product is down in the country already (an
     open outage, or a closed one that covered this batch's start: judging it again) or
@@ -73,19 +133,10 @@ def _open_outage(cur, batch, product):
     CLOSE-1: an outage is the product without any success in the country; one target failing
     alone is that target's 'down' on the tape only; a pending one opens it with its own 'down').
 
-    It starts when the product's last healthy pulse in the country (any target) finished, or
-    at this batch's start without one in the last INCIDENT_TTL; returns that start either way.
+    It starts at _outage_start; returns that start either way.
     """
     start = _batch_start(batch)
-    healthy = cur.execute(
-        "SELECT max(coalesce(r.finished_at,br.finished_at,b.finished_at)) AS at "
-        "FROM batch_runs br JOIN test_batches b USING(batch_id) "
-        "LEFT JOIN test_runs r ON r.run_key=br.run_key "
-        "WHERE b.kind='pulse' AND b.country_code=%s AND br.product_id=%s AND br.status='done' "
-        "AND br.successes>0 AND b.scheduled_for<%s AND b.scheduled_for>=%s",
-        (batch["country_code"], product, batch["scheduled_for"], start - INCIDENT_TTL),
-    ).fetchone()["at"]
-    since = min(healthy, start) if healthy else start
+    since = _outage_start(cur, batch, product)
     other = (batch["country_code"], batch["scheduled_for"], batch["batch_id"], product)
     if _exists(cur, OTHER_TARGET_SQL, other):
         return since
@@ -121,6 +172,50 @@ def _close_outages(cur, batch, product, *, source=None):
         + "RETURNING outage_id,batch_id,started_at,ended_at",
         (start, product, batch["country_code"], start, *((source,) if source else ())),
     ).fetchall()
+
+
+def _pulse_history(cur, cfg, batch, product, rule=False):
+    """The series' trailing baseline: its last done pulses with requests before this batch (with
+    the rule, of the time its country counted), but those mostly refused at login (proxy_login)
+    or answered mostly "no exit" (pulse_no_exit)."""
+    return cur.execute(
+        "SELECT br.batch_id,b.finished_at,b.scheduled_for,br.requests,br.successes,br.challenges,"
+        "br.blocks,br.run_key FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "LEFT JOIN test_runs r ON r.run_key=br.run_key "
+        f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
+        "WHERE b.kind='pulse' AND b.country_code=%(country)s AND b.target_id=%(target)s "
+        "AND br.product_id=%(product)s AND br.status='done' AND br.requests>0 "
+        f"AND {proxy_login.MEASURED_SQL} AND NOT {pulse_no_exit.EMPTY_SQL} "
+        "AND b.scheduled_for<%(slot)s ORDER BY b.scheduled_for DESC LIMIT %(n)s",
+        {
+            "country": batch["country_code"],
+            "target": batch["target_id"],
+            "product": product,
+            "slot": batch["scheduled_for"],
+            "n": cfg["baseline_batches"],
+            **verdicts.params(rule),
+        },
+    ).fetchall()
+
+
+def _pulse_incident(cur, batch, product, now):
+    """The series' latest incident or recovery event, if any."""
+    # The series state as of this batch: events of earlier batches only, so judging a batch
+    # again (after a watermark reset) reaches the same verdict.
+    return cur.execute(
+        "SELECT e.kind,e.data FROM test_events e JOIN test_batches b USING(batch_id) "
+        "WHERE e.product_id=%s AND e.at>=%s AND e.country_code=%s AND e.target_id=%s "
+        "AND b.kind='pulse' AND e.kind=ANY(%s) AND b.scheduled_for<%s "
+        "ORDER BY b.scheduled_for DESC,e.event_id DESC LIMIT 1",
+        (
+            product,
+            now - INCIDENT_TTL,
+            batch["country_code"],
+            batch["target_id"],
+            [*INCIDENTS, "recovered"],
+            batch["scheduled_for"],
+        ),
+    ).fetchone()
 
 
 def _rate(numerator, requests):

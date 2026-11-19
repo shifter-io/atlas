@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // The English guard (ENGLISH-GUARD-1, #976): the API serves values, never

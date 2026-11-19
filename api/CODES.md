@@ -5,7 +5,7 @@ do not edit it by hand: change the registry and run that test with `GOLDEN_WRITE
 
 Every code the API sends, where it appears, its parameters and one English sentence for
 documentation only. `GET /v1/codes` serves the same list, with the catalog sets' codes of the
-current build, so a site in any language can translate every code. Contract: **2026-11-14**, the
+current build, so a site in any language can translate every code. Contract: **2026-11-19**, the
 date of the last breaking change (`/v1/version` and `/v1/codes` `contract`;
 what changed on each date: `api/CHANGES.md`).
 
@@ -87,10 +87,10 @@ Used in: `/v1/changelog entries[].event`, `/v1/networks/{slug} changelog[].event
 
 | Code | Parameters | Meaning |
 |---|---|---|
-| `success_rose` | `metric` (code:change_metric), `value` (ratio), `previous` (ratio), `delta` (number, points) | Success rose by {delta} points. |
-| `success_fell` | `metric` (code:change_metric), `value` (ratio), `previous` (ratio), `delta` (number, points) | Success fell by {delta} points. |
-| `latency_rose` | `metric` (code:change_metric), `value` (ms), `previous` (ms), `delta` (number, percent) | Latency rose by {delta}. |
-| `latency_fell` | `metric` (code:change_metric), `value` (ms), `previous` (ms), `delta` (number, percent) | Latency fell by {delta}. |
+| `success_rose` | `metric` (code:change_metric), `value` (ratio), `previous` (ratio), `delta` (number, points), `basis` (code:latency_delta_basis) | Success rose by {delta} points. |
+| `success_fell` | `metric` (code:change_metric), `value` (ratio), `previous` (ratio), `delta` (number, points), `basis` (code:latency_delta_basis) | Success fell by {delta} points. |
+| `latency_rose` | `metric` (code:change_metric), `value` (ms), `previous` (ms), `delta` (number, percent), `basis` (code:latency_delta_basis) | Latency rose by {delta}. |
+| `latency_fell` | `metric` (code:change_metric), `value` (ms), `previous` (ms), `delta` (number, percent), `basis` (code:latency_delta_basis) | Latency fell by {delta}. |
 | `pool_grew` | `uniqueIps` (count), `previousUniqueIps` (count), `deltaPct` (number, percent) | The pool grew by {deltaPct}. |
 | `pool_shrank` | `uniqueIps` (count), `previousUniqueIps` (count), `deltaPct` (number, percent) | The pool shrank by {deltaPct}. |
 | `countries_lost` | `countries` (count), `previousCountries` (count), `delta` (integer, count), `lostCountryCodes` (country_list), `comparedRange` (code:range) | {delta} countries lost: not seen in the last {comparedRange}: {lostCountryCodes}. |
@@ -133,6 +133,17 @@ Used in: `/v1/changelog entries[].severity`, `/v1/networks/{slug} changelog[].se
 | `info` |  | Neither better nor worse. |
 | `good` |  | A change for the better. |
 | `bad` |  | A change for the worse. |
+
+### `country_status`
+
+Used in: `/v1/networks/{slug} requestedCountryStatus[].status`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `counts` |  | Its latest daily test there found at least the methodology's minimum of unique IPs (country_min_ips), or it is the first test under that minimum of a country that had 50 or more: the country counts. |
+| `too_few_ips` |  | Low availability: its latest daily test there found fewer unique IPs than the methodology's minimum (country_min_ips), but at least one (the network has almost no exits there): the country's data is left out. |
+| `no_exits` |  | No exits: its latest daily test there found no unique IP at all: the country's data is left out. |
+| `no_daily_test` |  | No daily test there yet: the country's data is left out. |
 
 ### `discount_source`
 
@@ -182,6 +193,7 @@ Used in: `* error.code`
 | `conflicting_parameters` | `names` (string_list) | The parameters {names} cannot be combined. |
 | `unavailable` | `reason` (code:unavailable_reason) | Not served now: {reason}. |
 | `busy` |  | The server is busy computing other answers; try again after Retry-After seconds. |
+| `rate_limited` |  | Too many answers computed on request from one address; try again after Retry-After seconds. |
 | `internal_error` |  | The answer could not be read; try again. |
 
 ### `error_format`
@@ -310,6 +322,16 @@ Used in: `/v1/changelog entries[].incident.severity`, `/v1/networks/{slug} chang
 | `moderate` |  | Between minor and major. |
 | `major` |  | Long or wide. |
 
+### `latency_delta_basis`
+
+Used in: `/v1/changelog entries[].values.basis`, `/v1/networks/{slug} changelog[].values.basis`, `* **.latencyDeltaBasis`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `day` |  | The last whole day against the day before. |
+| `week` |  | The last 7 whole days against the 7 before. |
+| `month` |  | The last 30 whole days against the 30 before. |
+
 ### `na_reason`
 
 Used in: `* **.naReason`, `* **.naReasons.<id>`, `/v1/coverage fields.<id>.reason`, `/v1/coverage/{slug} sections.<id>[].reason`, `/v1/coverage dataset.sections.fields[].reason`, `/v1/coverage targets[].sections.fields[].reason`, `/v1/coverage scopes[].sections.fields[].reason`, `/v1/coverage profiles[].sections.fields[].reason`
@@ -329,10 +351,14 @@ Used in: `* **.naReason`, `* **.naReasons.<id>`, `/v1/coverage fields.<id>.reaso
 | `no_cheaper_peer` |  | No cheaper network of the kind with a success rate close enough. |
 | `no_pulse_fleet` |  | No pulse batch in the published snapshot. |
 | `not_named_by_provider` |  | The provider names no plan or pool. |
+| `methodology_file_unknown` |  | The API holds no rules file for this methodology id. |
 | `no_evidence` |  | No monitoring evidence in the window. |
 | `no_score_to_compare` |  | No earlier score to compare with. |
 | `no_pulse_tests` |  | Too few finished pulse tests. |
 | `no_load_test` |  | No load test in the window. |
+| `needs_two_days` |  | The latency change needs two whole days of daily tests. |
+| `needs_two_periods` |  | Before the day fallback: the 7d or 30d latency change needed two periods of 7 or 30 whole days. |
+| `day_not_covered` |  | A day or period the latency change compares has too few tested countries or successes. |
 | `required_target_missing` |  | A required target has no ready result. |
 | `no_price_evidence` |  | No verified, dated price per GB. |
 | `few_requests` |  | Fewer requests than the methodology requires. |
@@ -378,6 +404,7 @@ Used in: `/v1/coverage fields.<id>.source`, `/v1/coverage/{slug} sections.<id>[]
 | `site.score_weights` |  | The catalog's score weights. |
 | `site.scopes` |  | The catalog's test scope row. |
 | `public.targets` |  | The framework's target list. |
+| `public.methodologies` |  | The framework's methodology rules, by id. |
 
 ### `outcome`
 
@@ -456,6 +483,7 @@ Used in: `/v1/overlap networks[].poolBasis`
 
 | Code | Parameters | Meaning |
 |---|---|---|
+| `unique_ips` |  | The range's unique addresses (uniqueIps), as every answer shows them. |
 | `overlap_ips_ours` |  | The pool the overlap comparison measured. |
 | `window_unique_ips` |  | The window's unique addresses. |
 
@@ -563,7 +591,7 @@ Used in: `* **.successScore.basis`
 
 | Code | Parameters | Meaning |
 |---|---|---|
-| `all_targets` |  | The network's success over every target, ranked among its kind. |
+| `card_targets` |  | The network's success on the 8 card targets, each scored by its distance from the best network of its kind, equal weights. |
 | `median_success_rate` |  | The median network's success rate. |
 | `mean_success_rate` |  | The mean success rate of the networks. |
 | `success_rate` |  | The success rate of the tests themselves. |
@@ -575,7 +603,7 @@ Used in: `* **.breakdown.<key>`, `/v1/meta weights.<key>`, `/v1/meta profiles[].
 | Code | Parameters | Meaning |
 |---|---|---|
 | `reliability` |  | Success on the required targets. |
-| `speed` |  | Latency under load. |
+| `speed` |  | Latency of normal requests (the pulses). |
 | `uptime` |  | Availability in the pulse tests. |
 | `coverage` |  | Countries served. |
 | `diversity` |  | Spread of the exit addresses over networks. |
@@ -585,7 +613,7 @@ Used in: `* **.breakdown.<key>`, `/v1/meta weights.<key>`, `/v1/meta profiles[].
 
 ### `score_status`
 
-Used in: `* **.successScore.status`, `* **.scores.<id>.status`, `* **.statuses[]`, `* **.browserOverall.<id>.success.status`, `/v1/targets targets[].scoreStatus.<id>.status`, `/v1/networks/{slug}/chart success[].status`, `/v1/home market.mostReliable.status`
+Used in: `* **.successScore.status`, `* **.exclusiveScore.status`, `* **.scores.<id>.status`, `* **.statuses[]`, `* **.browserOverall.<id>.success.status`, `/v1/targets targets[].scoreStatus.<id>.status`, `/v1/networks/{slug}/chart success[].status`, `/v1/home market.mostReliable.status`
 
 | Code | Parameters | Meaning |
 |---|---|---|
@@ -593,6 +621,10 @@ Used in: `* **.successScore.status`, `* **.scores.<id>.status`, `* **.statuses[]
 | `not_enough_data` |  | Too few tries to score. |
 | `too_few_networks` |  | Too few networks of the kind to rank. |
 | `no_ranked_targets` |  | None of its targets is ranked. |
+| `partial_targets` |  | Scored and ranked on the targets with tries: at least one card target had none in the window. |
+| `not_scored` |  | An Atlas Score trend point: the build of that hour or day published no Atlas Score for the network. |
+| `no_history` |  | An Atlas Score trend point: no published build's score is stored for that hour or day (before the history began). |
+| `earlier_rule` |  | An Atlas Score trend point scored under an earlier methodology: shown where the current one has no score for that hour or day. |
 
 ### `search_item_type`
 
@@ -615,7 +647,7 @@ Used in: `* **.tape[].source`, `* **.targets[].source`, `* **.networks[].source`
 
 ### `target`
 
-Used in: `* **.targets[].target`, `* **.sources[].target`, `/v1/targets targets[].sources[]`, `* **.tape[].target`, `* **.latencyTarget`, `* **.targets[].group`, `/v1/meta targets[].id`, `/v1/targets targets[].id`, `/v1/targets networks[].cells.<key>`, `/v1/home insights.valueAll.targets[]`, `/v1/home insights.valueAll.rows[].missingTargets[]`, `/v1/home insights.valueAll.rows[].byTarget.<key>`, `/v1/home insights.hardest.target`
+Used in: `* **.targets[].target`, `* **.sources[].target`, `/v1/targets targets[].sources[]`, `* **.tape[].target`, `* **.latencyTarget`, `* **.targets[].group`, `/v1/meta targets[].id`, `/v1/targets targets[].id`, `/v1/targets networks[].cells.<key>`, `/v1/home insights.valueAll.targets[]`, `/v1/home insights.valueAll.rows[].missingTargets[]`, `/v1/home insights.valueAll.rows[].byTarget.<key>`, `/v1/home insights.hardest.id`
 
 From the build's catalog (site.targets: label and pass condition): its codes are listed in `GET /v1/codes`.
 

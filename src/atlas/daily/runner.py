@@ -7,13 +7,19 @@ network's manifest; the manager's current wheel (`<env>/wheels/current.json`, wr
 runner writes a fresh one-slot campaign beside it: a new campaign id, and per network a
 manifest re-created for this hour with the template's settings (same concurrency and stop
 rule as the 24-hour rounds, same target and HTTPS redirect) and the countries due
-(`due_countries`). `tick.run_tick` launches slot 0 (one worker per network and
-region with something due), `collector.run_collector` harvests it, and whatever happens every
+(`due_countries`); a network with a connection budget (daily.budget, PROXY-CHEAP-BUDGET-1)
+runs at its share for the hour's droplets instead of the template's concurrency, recorded as
+`budget`. `tick.run_tick` launches slot 0 (one worker per network and region with something
+due), `collector.run_collector` harvests it, and whatever happens every
 recorded worker still up is removed through `scope.guarded_delete` and checked gone: after a
 failure, a signal (`daily run` cancels on SIGTERM, SIGHUP and SIGINT; the removal is shielded) or
 the run's time limit (the hour's slot plus `RUN_MARGIN_MINUTES`). A worker whose create was in
-flight is first taken by its exact name under the hour tag. The run's outcome is written to
-`<root>/daily.json` (names and counts, never an address), with the code that ran (`code`).
+flight is first taken by its exact name under the hour tag. A country test runs until it is
+finished: the time limit is no slot end but daily.overtime's safety stop, which first stops the
+workers still running so their finished countries are collected (DAILY-OVERTIME-1, #1152).
+A network whose cells all ended while others run goes to `ready` at once (DAILY-IMPORT-1).
+The run's outcome is written to `<root>/daily.json` (names and counts, never an address), with
+the code that ran (`code`), each overtime stop's workers (`stopped`), failed cells (`failed_cells`).
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ import secrets
 import shutil
 from collections.abc import Callable
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -31,16 +37,18 @@ from ..campaign import collector, current_wheel
 from ..campaign.collector import Pacing, run_collector
 from ..campaign.contracts import CampaignSpec, hour_path, hour_tag, spec_path
 from ..campaign.current_wheel import CurrentWheel
-from ..campaign.launch import HourWork, take_in_flight
+from ..campaign.launch import HourWork, failed_cells, take_in_flight
 from ..campaign.tick import load_hour, load_spec, run_tick, utc_now
 from ..onboarding import manifest
 from ..onboarding.files import atomic_bytes, atomic_json, lock
 from ..onboarding.scheduler import Clock
+from . import budget, overtime, pace
 from .planner import HourPlan, load_schedules, plan_hour
 
 GONE_CHECKS = 6  # reads of a removed worker before it counts as left over
 GONE_POLL_SECONDS = 5.0
-RUN_MARGIN_MINUTES = 30  # after the slot's end the run stops waiting and cleans up
+READY_POLL_SECONDS = 15.0  # how often the hour's cells are read for `ready`
+WAITING = ("pending", "running")  # a cell whose round is not collected yet
 
 
 class RunError(ValueError):
@@ -52,6 +60,7 @@ class RunInputs:
     template: Path  # a planned campaign root on the manager
     formulas: Path  # the formula JSONs (`formulas/<network>.json`)
     start: str = "now-hour"  # "now-hour", "next-hour" or an ISO whole hour with offset
+    database_file: Path | None = None  # the latest daily tests for the pace (daily.pace)
 
 
 def start_hour(value: str, now: datetime) -> tuple[datetime, bool]:
@@ -68,10 +77,10 @@ def start_hour(value: str, now: datetime) -> tuple[datetime, bool]:
     return begins, begins == current
 
 
-def time_limit(begins: datetime, now: datetime, slot_minutes: int) -> float:
-    """Seconds the run may take: until the slot's end plus the margin."""
-    end = begins + timedelta(minutes=slot_minutes + RUN_MARGIN_MINUTES)
-    return max(0.0, (end - now).total_seconds())
+def time_limit(begins: datetime, now: datetime) -> float:
+    """Seconds the run may take: until its safety stop plus the grace to collect what it
+    stopped (daily.overtime), whatever its slot."""
+    return overtime.limit(begins, now)
 
 
 def hour_plan(inputs: RunInputs, now: datetime) -> tuple[CampaignSpec, HourPlan, datetime, bool]:
@@ -85,11 +94,24 @@ def hour_plan(inputs: RunInputs, now: datetime) -> tuple[CampaignSpec, HourPlan,
     return base, plan, begins, current
 
 
+def hour_budget(template: Path, base: CampaignSpec, plan: HourPlan) -> dict:
+    """The hour's budgeted networks (budget.daily), the template's concurrency their cap."""
+    listed = [network for network in plan.networks() if network in budget.budgets()]
+    caps = {n: manifest.load(template / base.manifests[n])["settings"] for n in listed}
+    caps = {network: settings["concurrency"] for network, settings in caps.items()}
+    try:
+        return budget.daily(plan, caps)
+    except budget.BudgetError as error:
+        raise RunError(str(error)) from None
+
+
 @dataclass(frozen=True)
 class HourSetup:
     """What `prepare` writes the hour's campaign from: the template's root and spec, the
-    hour's cells, the hour, whether it is the current one, the time now and the manager's
-    current wheel (IMAGE-AUTO-1), which replaces the template's when there is one."""
+    hour's cells, the hour, whether it is the current one, the time now, the manager's
+    current wheel (IMAGE-AUTO-1), which replaces the template's when there is one, and the
+    budgeted networks' shares (hour_budget) and what each country's pace starts from
+    (daily.pace)."""
 
     template: Path
     base: CampaignSpec
@@ -98,6 +120,8 @@ class HourSetup:
     current: bool
     now: datetime
     code: CurrentWheel | None = None
+    shares: dict = field(default_factory=dict)
+    history: pace.History = field(default_factory=pace.History)
 
 
 @dataclass(frozen=True)
@@ -109,6 +133,11 @@ class _Slot:
     spec: CampaignSpec
     services: tuple
     pacing: Pacing | None
+    begins: datetime | None = None  # the hour its overtime stops count from (daily.overtime)
+    clock: object = None
+    outcome: dict = field(default_factory=dict)  # the hour's outcome: what overtime stopped
+    pulses: frozenset | None = None  # the networks whose pulses are planned (overtime.pulsed)
+    ready: Callable | None = None  # ready(root, networks): their cells ended (`_ready`)
 
 
 def _manifest(hour: HourSetup, root: Path, network: str) -> str:
@@ -118,7 +147,12 @@ def _manifest(hour: HourSetup, root: Path, network: str) -> str:
     if old.get("execution_mode") != "ephemeral":
         raise RunError(f"{network}: the template manifest is not an ephemeral campaign")
     config = source.parent / "provider.toml"
-    run_settings = dict(old["settings"])
+    run_settings, expected = dict(old["settings"]), dict(old["settings"])
+    if network in hour.shares:
+        run_settings["concurrency"] = expected["concurrency"] = hour.shares[network]["concurrency"]
+    due = hour.plan.due(network)
+    paced = pace.country_pace(network, due, hour.history, run_settings["concurrency"])
+    paced = budget.capped(network, paced)
     retry = bool(run_settings.pop("retry_http_469", False))
     classes = bool(run_settings.pop("answer_classes", False))
     path = manifest.create(
@@ -135,9 +169,10 @@ def _manifest(hour: HourSetup, root: Path, network: str) -> str:
         answer_classes=classes,
         target_url=old["target_url"],
         slot_minutes=manifest.slot_minutes(old),
-        due_countries=hour.plan.due(network),
+        due_countries=due,
+        country_pace=paced,
     )
-    if manifest.load(path)["settings"] != old["settings"]:
+    if manifest.load(path)["settings"] != expected:
         raise RunError(f"{network}: the hour's settings differ from the template's")
     atomic_bytes(path.parent / "provider.toml", config.read_bytes())
     return path.relative_to(root).as_posix()
@@ -218,18 +253,64 @@ async def clean_up(
     return left, skipped
 
 
+async def _ready(slot: _Slot, clock) -> None:
+    """Call slot.ready(root, networks) once with each network whose cells all ended while
+    another's still run, so its import never waits for theirs (DAILY-IMPORT-1, as #1200 did for
+    a budgeted network); the last ones are left to the import once the run ends."""
+    if slot.ready is None:
+        return
+    handed: set[str] = set()
+    while True:
+        cells = load_hour(slot.root, slot.spec, 0).cells
+        waiting = {key.split("/")[0] for key, status in cells.items() if status in WAITING}
+        if not waiting:
+            return
+        ended = {key.split("/")[0] for key in cells} - waiting - handed
+        if ended:
+            handed |= ended
+            slot.ready(slot.root, frozenset(ended))
+        await clock.sleep(READY_POLL_SECONDS)
+
+
+def waiting(template: Path, begins: datetime) -> frozenset[str]:
+    """The networks with a cell still pending or running in the hour's roots beside the template
+    whose run has not ended (no `daily.json`): verify counts them late (DAILY-IMPORT-1)."""
+    found: set[str] = set()
+    for root in sorted(template.resolve().parent.glob(f"{begins:%Y%m%dt%H%M%S}z-*")):
+        if (root / "daily.json").exists():  # ended (a signal, an error): nothing still runs
+            continue
+        try:
+            cells = load_hour(root, load_spec(root), 0).cells
+        except (OSError, ValueError):  # a root being written or removed: nothing known
+            continue
+        found |= {key.split("/")[0] for key, status in cells.items() if status in WAITING}
+    return frozenset(found)
+
+
 async def _work(slot: _Slot) -> None:
-    """Launch the hour's slot and harvest it until done."""
+    """Launch the hour's slot and harvest it until done, its workers stopped at their
+    overtime stops meanwhile (daily.overtime.watch) and the networks that ended first handed
+    to `ready`."""
     cloud, remote_factory, launcher, harvester = slot.services
     await run_tick(slot.root, launcher=launcher, now_mode=True, slot=0)
-    await run_collector(
-        slot.root,
-        harvester=harvester,
-        cloud=cloud,
-        remote_factory=remote_factory,
-        until_done=True,
-        pacing=slot.pacing,
+    clock = slot.clock or Clock()
+    stopper = overtime.watch(
+        slot.root, slot.spec, remote_factory, slot.begins, clock, slot.outcome, slot.pulses
     )
+    watchers = [asyncio.ensure_future(stopper), asyncio.ensure_future(_ready(slot, clock))]
+    try:
+        await run_collector(
+            slot.root,
+            harvester=harvester,
+            cloud=cloud,
+            remote_factory=remote_factory,
+            until_done=True,
+            pacing=slot.pacing,
+        )
+    finally:
+        for watcher in watchers:
+            watcher.cancel()
+        await asyncio.gather(*watchers, return_exceptions=True)
 
 
 async def _bounded(slot: _Slot, limit: float, outcome) -> BaseException | None:
@@ -271,6 +352,7 @@ async def _remove_shielded(root: Path, spec: CampaignSpec, cloud, clock, outcome
     finally:
         if cloud is not None:
             await cloud.close()
+        outcome["failed_cells"] = failed_cells(load_hour(root, spec, 0))
         atomic_json(root / "daily.json", outcome)
 
 
@@ -282,19 +364,25 @@ async def run_hour(
     pacing: Pacing | None = None,
     clock=None,
     limit: float | None = None,
+    ready: Callable | None = None,
 ) -> dict:
     """Run the hour's daily test; returns the outcome written to `<root>/daily.json`.
 
     `limit` (seconds) defaults to `time_limit`; a cancellation (a signal) or the limit ends the
-    run as failed, and the clean-up then runs to its end even if cancelled again."""
+    run as failed, and the clean-up then runs to its end even if cancelled again. `ready`, if
+    given, is called with the hour's root and the networks whose cells ended while another
+    network's still run (`_ready`)."""
     now = now or utc_now()
     base, plan, begins, current = hour_plan(inputs, now)
     if not plan.cells:
         return {"state": "nothing_due", "plan": plan.to_dict()}
+    shares = hour_budget(inputs.template, base, plan)
     code = current_wheel.load(current_wheel.wheels_dir(inputs.template.parent.parent))
-    root = prepare(HourSetup(inputs.template, base, plan, begins, current, now, code))
+    history = pace.history(inputs.formulas, inputs.database_file, now)
+    setup = HourSetup(inputs.template, base, plan, begins, current, now, code, shares, history)
+    root = prepare(setup)
     spec = load_spec(root)
-    limit = time_limit(begins, now, spec.slot_minutes) if limit is None else limit
+    limit = time_limit(begins, now) if limit is None else limit
     cloud, remote_factory, launcher, harvester = services(root, spec)
     outcome = {
         "campaign_id": spec.campaign_id,
@@ -302,9 +390,11 @@ async def run_hour(
         "state": "failed",
         "leftover": None,  # unknown until the clean-up has checked
         "code": code.record() if code else {"wheel_sha256": spec.wheel_sha256},
-    }
+    } | ({"budget": shares} if shares else {})
     built = (cloud, remote_factory, launcher, harvester)
-    error = await _bounded(_Slot(root, spec, built, pacing), limit, outcome)
+    pulses = overtime.pulsed(inputs.template.parent.parent)  # the manager's environment
+    slot = _Slot(root, spec, built, pacing, begins, clock, outcome, pulses, ready)
+    error = await _bounded(slot, limit, outcome)
     await _remove_shielded(root, spec, cloud, clock, outcome)
     if error is not None:
         raise error

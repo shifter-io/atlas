@@ -22,6 +22,10 @@ func init() {
 		Values: codes("info", "Neither better nor worse.", "good", "A change for the better.", "bad", "A change for the worse.")})
 	RegisterCodeSet(CodeSet{Name: "change_metric", Source: CodesFromAPI, UsedIn: entry("values.metric"),
 		Values: codes("success", "The success rate.", "latency", "The latency.")})
+	RegisterCodeSet(CodeSet{Name: "latency_delta_basis", Source: CodesFromAPI, UsedIn: append(entry("values.basis"), "* **.latencyDeltaBasis"),
+		Values: codes(DeltaBasisDay, "The last whole day against the day before.",
+			DeltaBasisWeek, "The last 7 whole days against the 7 before.",
+			DeltaBasisMonth, "The last 30 whole days against the 30 before.")})
 	RegisterCodeSet(CodeSet{Name: "incident_severity", Source: CodesFromAPI, UsedIn: append(entry("incident.severity"), "* **.incidents[].severity", "* **.bands[].severity"),
 		Values: codes("minor", "Short and narrow.", "moderate", "Between minor and major.", "major", "Long or wide.")})
 	RegisterCodeSet(CodeSet{Name: "incident_kind", Source: CodesFromAPI, UsedIn: append(entry("incident.kind"), "* **.incidents[].kind"),
@@ -35,9 +39,11 @@ func init() {
 // (changeValueKeys): a delta is signed, its sentence words its size.
 func changeEventCodes() []Code {
 	pts, pct := param("delta", "number", "points"), param("deltaPct", "number", "percent")
-	success := []CodeParam{param("metric", "code:change_metric", ""), param("value", "ratio", ""), param("previous", "ratio", ""), pts}
+	// basis: the latency change's periods (null on a success change).
+	basis := param("basis", "code:latency_delta_basis", "")
+	success := []CodeParam{param("metric", "code:change_metric", ""), param("value", "ratio", ""), param("previous", "ratio", ""), pts, basis}
 	latency := []CodeParam{param("metric", "code:change_metric", ""), param("value", "ms", ""), param("previous", "ms", ""),
-		param("delta", "number", "percent")}
+		param("delta", "number", "percent"), basis}
 	pool := []CodeParam{param("uniqueIps", "count", ""), param("previousUniqueIps", "count", ""), pct}
 	geo := []CodeParam{param("value", "ratio", ""), param("previous", "ratio", ""), pts}
 	price := []CodeParam{param("fromRate", "usd_per_gb", ""), param("toRate", "usd_per_gb", ""), pct, param("plan", "name", "")}

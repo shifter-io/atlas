@@ -30,6 +30,7 @@ from urllib.parse import urlsplit
 from ..bytes_io import ByteCount
 from ..models import Outcome, RequestContext, RunConfig
 from ..targets import BrowserTarget, PageSpec, PageView
+from .asset_cache import AssetCache, network_cache
 from .contracts import (
     AI_SOURCES,
     GOOGLE_SEARCH,
@@ -40,8 +41,10 @@ from .contracts import (
     try_record,
 )
 from .driver import BrowserHung, NavigationError, Page, UserAgentRefused
+from .gate import Gate
 from .geo import GeoRefused
 from .judge import PageAssessment, failed, selectors
+from .lean import Lean
 from .pool import BrowserPool, EnginePool
 from .relay import relayed
 from .settings import BrowserOptions, TargetSettings
@@ -121,12 +124,32 @@ async def _accept_consent(page: Page, target: Any) -> None:
         await page.click(CONSENT_ACCEPT)
 
 
+def lean_rules(
+    browser: BrowserOptions, settings: TargetSettings, cache: AssetCache | None = None
+) -> Lean:
+    """The try's traffic rules: each of the target's own, else the [browser] default; with
+    cache_urls, served from `cache` (the run's network's)."""
+
+    def own(name: str) -> Any:
+        value = getattr(settings, name)
+        return getattr(browser, name) if value is None else value
+
+    block_urls, cache_urls = own("block_urls"), own("cache_urls")
+    waits, services = own("wait_until"), own("chrome_services")
+    return Lean(own("block_resources"), block_urls, cache_urls, waits, services, cache)
+
+
 class BrowserTransport:
     """A run's browser tries on the host's shared pool, or on one engine's pool of it (then
     every try record names that `engine`). `settings` is the target's [[target]]:
-    its inputs, and its timeout_s and block_resources overriding the [browser] defaults.
+    its inputs, and its timeout_s and traffic rules (lean_rules) overriding the [browser]
+    defaults.
     `view_sink`, if given, receives (request index, the PageView judge() got) after the try is
-    recorded, once per try that reached a view; only scripts/browser_capture.py passes one."""
+    recorded, once per try that reached a view; only scripts/browser_capture.py passes one.
+    `gate`, a budgeted network's (gate.py; the host's RunTransport sets it), holds its tries to
+    one at a time and their gateway connections to its limit."""
+
+    gate: Gate | None = None
 
     def __init__(
         self,
@@ -145,8 +168,8 @@ class BrowserTransport:
         self.recorder = recorder if recorder is not None else NullRecorder()
         self.inputs = settings.inputs
         self.timeout_s = settings.timeout_s or browser.page_timeout_s
-        blocked = settings.block_resources
-        self.block = browser.block_resources if blocked is None else blocked
+        cache = network_cache(config.provider, config.product)
+        self.block = lean_rules(browser, settings, cache)
         self.screenshots = browser.screenshots
         self.idle_s = browser.idle_timeout_s
         self._run_id, self._index = str(uuid.uuid4()), 0
@@ -228,7 +251,12 @@ class BrowserTransport:
             return failed("proxy_connect", "socks5_auth_unsupported")
         spec = target.page(context, self.inputs)
         mark = time.perf_counter()
-        async with self.pool.browser() as browser, relayed(proxy) as (through, relay):
+        turn = self.gate.tries if self.gate is not None else contextlib.nullcontext()
+        async with (
+            turn,
+            self.pool.browser() as browser,
+            relayed(proxy, self.gate) as (through, relay),
+        ):
             timings["queue"] = _ms(mark)
             # Read once the relay has closed, after the context: whatever crossed, however the
             # try ends.
@@ -277,7 +305,7 @@ class BrowserTransport:
         return assessment
 
     async def _load(self, page: Page, target: BrowserTarget, spec: PageSpec, state: dict) -> Any:
-        """Navigate, then settle: consent, wait_for, settle_ms and the target's interact()."""
+        """Navigate, then settle: consent, ready (else wait_for), settle_ms and interact()."""
         timings = state["timings"]
         timeout_ms = self.timeout_s * 1000
         mark = time.perf_counter()
@@ -286,8 +314,8 @@ class BrowserTransport:
         mark = time.perf_counter()
         if target.id == GOOGLE_SEARCH:
             await _accept_consent(page, target)
-        if spec.wait_for:
-            await page.wait_for(spec.wait_for, timeout_ms)
+        if wait := spec.ready or spec.wait_for:
+            await page.wait_for(wait, timeout_ms)
         await asyncio.sleep(spec.settle_ms / 1000)
         extra = await target.interact(page, spec)
         timings["settle"] = _ms(mark)

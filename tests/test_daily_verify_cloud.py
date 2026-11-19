@@ -54,16 +54,19 @@ class FakeSpaces:
 def test_droplets_older_than_their_hour_are_orphans():
     cloud = FakeCloud(
         [
-            droplet("atlas-camp-worker-a", WORKER_TAG, timedelta(minutes=50)),
+            # A daily worker may run past its hour (DAILY-OVERTIME-1): 3 h is no orphan.
+            droplet("atlas-camp-worker-a", WORKER_TAG, timedelta(hours=3)),
+            droplet("atlas-camp-worker-b", WORKER_TAG, timedelta(hours=6, minutes=50)),
             droplet("atlas-pulse-fra1-alpha", PULSE_TAG, timedelta(minutes=91)),
         ]
     )
     checks = verify_cloud.droplets(cloud, Hour(H, NOW))
     assert [(c.subject, c.ok, c.detail) for c in checks] == [
-        (WORKER_TAG, True, "1 up, 0 orphans"),
+        (WORKER_TAG, False, "2 up, 1 orphans: atlas-camp-worker-b"),
         (PULSE_TAG, False, "1 up, 1 orphans: atlas-pulse-fra1-alpha"),
-        ("total", False, "2 up now (read only)"),
+        ("total", False, "3 up now (read only)"),
     ]
+    assert verify_cloud.WORKER_ORPHAN == timedelta(hours=6, minutes=45)
     assert cloud.closed
 
 
