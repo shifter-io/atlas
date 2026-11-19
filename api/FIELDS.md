@@ -1295,7 +1295,12 @@ all-networks answer or a network without a product of the kind).
   of the methodology its own build was calculated with (`methodology.id`). A point of
   an earlier methodology (in production: every build before the 17 Nov 2026 05:06
   UTC recount, among them the 14, 15 and 16 Nov day ends) is never mixed in: it is
-  `no_history` unless it was recomputed.
+  `no_history` unless it was recomputed. SCORE-HISTORY-1: a methodology that differs
+  from the build's only in settings no Atlas Score reads (today `[success_score]`,
+  the Success x/10's: SUCCESS-ALL-8-1) counts as the same, so such a change keeps
+  every point. A change the Atlas Score reads (a weight, the Speed or latency rule)
+  is a break: the earlier points read `no_history` until the back-fill restates
+  them under the new methodology.
 - **Published or recomputed**: a point is the score its build published, or, where
   no published build of the methodology exists for that hour or day, the score
   **recomputed** afterwards by `atlas calculate-backfill-scores`. A recomputed point

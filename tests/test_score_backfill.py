@@ -8,6 +8,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from calculated_cases import lenient_policy
+from psycopg.types.json import Jsonb
 from test_calculated_hourly_reads import floor_hour
 from test_calculated_incremental import history
 from test_score_history import publish
@@ -76,6 +77,30 @@ def test_a_trend_reads_its_methodology_and_prefers_the_published_record(database
         (80.0, True),
         (90.0, True),
     ]
+
+
+def test_a_record_of_the_same_atlas_scores_is_not_missing(database, monkeypatch):
+    """SCORE-HISTORY-1: the back-fill skips an hour that a methodology differing only in
+    [success_score] recorded (the spark reads it), and fills one recorded under another weight."""
+    monkeypatch.setattr(score_backfill, "FIRST", "SELECT timestamptz '2026-11-01 00:00+00'")
+    definitions = {
+        "old": {"weights": {"speed": 0.2}, "success_score": {"basis": "daily_tests"}},
+        "other": {"weights": {"speed": 0.3}},
+    }
+    with connect(database) as conn:
+        for method, definition in definitions.items():
+            row = (method, Jsonb(definition))
+            conn.execute("INSERT INTO methodologies VALUES (%s,%s,now())", row)
+        new = {"weights": {"speed": 0.2}, "success_score": {"basis": "card_targets"}}
+        conn.execute("INSERT INTO methodologies VALUES ('new',%s,now())", (Jsonb(new),))
+        publish(conn, AS_OF, [], method="new")
+        for back, method in ((1, "old"), (2, "other")):
+            row = ("alpha", "residential", "24h", AS_OF - back * HOUR, 80.0, method, "build")
+            conn.execute(INSERT, row)
+        assert score_backfill.missing(conn, "new", hours=3, days=0) == (
+            AS_OF,
+            [AS_OF - 3 * HOUR, AS_OF - 2 * HOUR],
+        )
 
 
 def test_the_v21_step_marks_every_record_published_and_keys_the_source(database):

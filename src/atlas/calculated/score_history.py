@@ -21,6 +21,13 @@ SCORE-HISTORY-BACKFILL-1: a record's source is "build" (as published) or "backfi
 later at that as_of under the methodology then current, score_backfill.py). A spark reads only the
 records of its own build's methodology, so a point of another methodology is never mixed in (it is
 "stored": False unless a backfill recomputed it); at the same as_of a published record wins.
+
+SCORE-HISTORY-1: "its own build's methodology" is every methodology whose stored definition
+(methodologies.definition) equals the build's apart from DISPLAY_ONLY, the settings no Atlas Score
+reads (same_scores()). A change to them alone (SUCCESS-ALL-8-1's [success_score]) gives a new
+methodology id but the same Atlas Scores, so the spark keeps its points. Any other change (a weight,
+a Speed or latency rule) is a break: the earlier points are "stored": False until the back-fill
+restates them under the new methodology.
 """
 
 from __future__ import annotations
@@ -31,11 +38,14 @@ from datetime import timedelta
 from psycopg.rows import tuple_row
 
 from .latency_store import utc_day
+from .policy import digest
 
 PROFILE = "balanced"  # rankings.go RankingProfile: the score that ranks the leaderboard
 SLOTS = {"24h": 24, "7d": 7, "30d": 30}
 KEEP_DAYS = 31  # the 30d spark's 29 days before as_of's day, and two more
 HOUR, DAY = timedelta(hours=1), timedelta(days=1)
+# The methodology settings no Atlas Score reads (display only): the Success x/10's.
+DISPLAY_ONLY = ("success_score",)
 # The current build's network window scores (each v4 head network's windows), as published.
 RECORD = (
     "INSERT INTO calculated_score_history "
@@ -52,11 +62,16 @@ FORGET = (
     f"-interval '{KEEP_DAYS} days' FROM current_calculation JOIN calculation_builds b "
     "USING(build_id))"
 )
-# The records of one methodology before a cutoff, a published one after a recomputed one of the
-# same as_of (so it replaces it).
+# The records of the same Atlas Scores' methodologies before a cutoff, a published one after a
+# recomputed one of the same as_of (so it replaces it).
 READ = (
     "SELECT provider,kind,period,as_of,score FROM calculated_score_history "
-    "WHERE as_of>=%s AND as_of<%s AND methodology_id=%s ORDER BY as_of,source='build'"
+    "WHERE as_of>=%s AND as_of<%s AND methodology_id=ANY(%s) ORDER BY as_of,source='build'"
+)
+# The definitions of a methodology and of those with records in [since, until).
+DEFINITIONS = (
+    "SELECT methodology_id,definition FROM methodologies WHERE methodology_id=%s OR methodology_id "
+    "IN (SELECT DISTINCT methodology_id FROM calculated_score_history WHERE as_of>=%s AND as_of<%s)"
 )
 
 
@@ -67,13 +82,31 @@ def record(conn):
     conn.execute(FORGET)
 
 
+def same_scores(conn, method_id, since, until):
+    """The methodology ids with records in [since, until) whose definition equals method_id's
+    apart from DISPLAY_ONLY, method_id among them (alone when it has no stored definition)."""
+    cur = conn.cursor(row_factory=tuple_row)
+    found = dict(cur.execute(DEFINITIONS, (method_id, since, until)))
+    if method_id not in found:
+        return [method_id]
+    own = score_key(found[method_id])
+    return sorted(m for m, definition in found.items() if score_key(definition) == own)
+
+
+def score_key(definition):
+    """The digest of a methodology definition without its DISPLAY_ONLY settings."""
+    return digest({k: v for k, v in definition.items() if k not in DISPLAY_ONLY})
+
+
 def spark(conn, networks, as_of, method_id):
-    """Set each network window's atlas_score_spark from the records of methodology method_id
-    (the build's) before as_of and the window's own balanced score."""
+    """Set each network window's atlas_score_spark from the records before as_of of the
+    methodologies with the build's Atlas Scores (same_scores(), method_id the build's) and the
+    window's own balanced score."""
     since = utc_day(as_of) - (max(SLOTS.values()) - 1) * DAY
     found = defaultdict(dict)
     cur = conn.cursor(row_factory=tuple_row)
-    for provider, kind, period, at, score in cur.execute(READ, (since, as_of, method_id)):
+    ids = same_scores(conn, method_id, since, as_of)
+    for provider, kind, period, at, score in cur.execute(READ, (since, as_of, ids)):
         found[provider, kind, period][at] = score
     for entry in networks:
         for label, window in entry["windows"].items():
