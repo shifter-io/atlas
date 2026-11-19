@@ -21,7 +21,7 @@ from aiohttp_socks import (
     ProxyType,
 )
 
-from . import bytes_io
+from . import bytes_io, node_dns
 from .bytes_io import ByteCount, Exchange
 from .models import Outcome, ProxyConfig, RequestContext, RunConfig, protocol_of
 from .outcome import BODY_CODES, Verdict, failed_response, sniff_body
@@ -177,7 +177,7 @@ class HttpTransport:
         """One request; returns its outcome and any redirect Location header."""
         kwargs = _proxy_kwargs(spec, proxy)
         raw = bytearray()
-        status = location = error = exit_ip = None
+        status = location = error = exit_ip = detail = None
         verdict: str | None = None
         counted: ByteCount | None = None
         tls = spec.url.startswith("https:")
@@ -223,6 +223,8 @@ class HttpTransport:
             if classified is None:
                 raise
             error, verdict, status = classified[0], classified[1], classified[2] or status
+            if error == "dns":  # the node's own lookup: its text tells the cause (node_dns)
+                detail = node_dns.detail(exc)
         finally:
             latency_ms = (time.perf_counter() - started) * 1000
             _SOCKET.reset(token)
@@ -242,6 +244,7 @@ class HttpTransport:
             bytes_up=counted.up,
             bytes_down=counted.down,
             bytes_exact=counted.exact,
+            detail=detail,
         ), location
 
 
