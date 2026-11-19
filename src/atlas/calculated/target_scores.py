@@ -44,17 +44,17 @@ methodology's, so a delta never compares two rules (previous_scores()). It repla
 tests' generic_http alone (SUCCESS-DAILY-DISTANCE-1, 2026-11-16).
 
 SUCCESS-POINTS-1 (#1301, the owner, 2026-11-17; display only). Each network window's series point
-gains `success_score` = {score, status}: the same rule over the TRAILING window of the window's
-length ending at the point's end (point_overall(); network.point_trailing(),
-SUCCESS-TRAILING-1), its browser targets over that window's browser window, the best network the
-kind's best over that same window, so the newest point is the window's own score and a steady
-network's line reads its headline.
+gains `success_score` = {score, status}: the same rule over the card targets of the TRAILING window
+of the window's length ending at the point's end (point_overall(); network.point_trailing(),
+SUCCESS-TRAILING-1), the best network the kind's best over that same window, so the newest point
+is the window's own score and a steady network's line reads its headline. (A point over its own
+hour or day alone was too noisy: an hour holds the few countries whose daily test ran then.)
 
 DAY-SCORE-1 (display only). score_days() scores each network's days (network.Network.days(),
-each day's targets and card target tries measured as a 24h window's) as score_networks() scores
-its windows: per kind, the networks' same day against each other. Each day keeps its start and
-its success_overall without weights, so a day and a one-day window agree, and the last day (the
-24h window's span) is the 24h window's success_overall.
+each day's targets and card targets measured as a 24h window's) as score_networks() scores its
+windows: per kind, the networks' same day against each other. Each day keeps its start and its
+success_overall without weights, so a day and a one-day window agree, and the last day (the 24h
+window's span) is the 24h window's success_overall.
 
 SUCCESS-SCORE-DELTA-1 (display only). previous_scores() runs once per build on the completed
 network summaries (network.attach()): each window's success_overall and each target's success
