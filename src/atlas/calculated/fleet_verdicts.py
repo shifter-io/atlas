@@ -20,11 +20,21 @@ verdict only changes whether runs started at or after it count, so each fold rec
 started in the day before its cutoff that did not count (Counted.record()); the memos are emptied
 only when a run of that day that existed then does not count now but did then (Counted.stopped()),
 or a late verdict is older than that day.
+
+The latest build does not empty them for such runs (CALC-PERF-1: each time it folded the whole
+window again): it takes back only what those runs added before the IP state's cutoff (unfold()).
+Their IPs' sightings in their scopes are counted again from the counted runs' observations, those
+IPs' vectors moved at that cutoff as ipstate's ADVANCE moves them (out with the old sightings, in
+with the new), their newest sighting taken again from their sightings in every scope (the same
+folded observations), and the memos of the buckets they had observations in dropped, so those
+are counted and folded again. The memos are still emptied for another rule, a late verdict older
+than the recorded day, an older cutoff, or without an IP state.
 """
 
 from __future__ import annotations
 
 import hashlib
+import time
 from bisect import bisect_left
 from datetime import datetime, timedelta
 from itertools import groupby
@@ -32,7 +42,8 @@ from itertools import groupby
 from psycopg.rows import tuple_row
 from psycopg.types.json import Jsonb
 
-from .. import verdicts
+from .. import timing, verdicts
+from . import ipstate
 
 # fleetsql's BUCKET_IPS, FOLD and SPAN over the given runs only.
 PAIRS = "unnest(%s::timestamptz[],%s::bigint[]) k(t,run_key) JOIN ip_observations o "
@@ -68,6 +79,63 @@ STATE_TABLES = (
     "calculated_ip_vector_state",
 )
 EMPTY += tuple(f"DELETE FROM {table}" for table in STATE_TABLES)
+# unfold(), then UNFOLD: the (IP, scope_id) pairs the stopped runs saw in the folded buckets (a
+# scope_id's sightings in a batch and not: a relink moves a run between them, ipstate.py), and
+# their sightings counted again from the counted runs' observations there.
+TOUCHED = (
+    "CREATE TEMP TABLE verdicts_touched ON COMMIT DROP AS SELECT DISTINCT o.ip_id,r.scope_id "
+    "FROM test_runs r JOIN ip_observations o USING(run_key) "
+    "WHERE r.run_key=ANY(%(stopped)s::bigint[]) "
+    "AND o.bucket_start>=%(old)s AND o.bucket_start<%(cut)s"
+)
+FRESH = (
+    "CREATE TEMP TABLE verdicts_fresh ON COMMIT DROP AS SELECT o.ip_id,"
+    "r.scope_id::bigint*2+(r.batch_id IS NOT NULL)::int AS scope,max(o.bucket_start) AS last_seen "
+    "FROM test_runs r JOIN ip_observations o USING(run_key) JOIN verdicts_touched t "
+    "ON t.ip_id=o.ip_id AND t.scope_id=r.scope_id "
+    "WHERE r.scope_id IN (SELECT scope_id FROM verdicts_touched) "
+    "AND r.run_key=ANY(%(counted)s::bigint[]) "
+    "AND o.bucket_start>=%(old)s AND o.bucket_start<%(cut)s GROUP BY 1,2"
+)
+# The touched IPs' vectors at the state's cutoff (windows from prev): out with their sightings
+# before, in with those after (the touched pairs' replaced by the fresh ones), as ADVANCE.
+MOVE = """WITH w AS (
+ SELECT * FROM unnest(%(hours)s::int[],%(prev)s::timestamptz[]) AS w(hours,prev)
+), ips AS (SELECT DISTINCT ip_id FROM verdicts_touched
+), before AS (
+ SELECT g.* FROM ips CROSS JOIN LATERAL (SELECT g.ip_id,g.scope,g.last_seen
+  FROM calculated_scope_ip_last_seen g WHERE g.ip_id=ips.ip_id OFFSET 0) g
+), after AS (
+ SELECT * FROM before b WHERE NOT EXISTS (SELECT FROM verdicts_touched t
+  WHERE t.ip_id=b.ip_id AND t.scope_id=b.scope/2)
+ UNION ALL SELECT * FROM verdicts_fresh
+), moved AS (
+ SELECT w.hours,b.ip_id,array_agg(b.scope ORDER BY b.scope) AS scopes,-1 AS n
+ FROM before b JOIN w ON b.last_seen>=w.prev GROUP BY 1,2
+ UNION ALL
+ SELECT w.hours,a.ip_id,array_agg(a.scope ORDER BY a.scope),1
+ FROM after a JOIN w ON a.last_seen>=w.prev GROUP BY 1,2
+)
+INSERT INTO calculated_ip_vectors(window_hours,scopes,ips)
+SELECT hours,scopes,sum(n) FROM moved GROUP BY 1,2 HAVING sum(n)<>0
+ON CONFLICT(window_hours,scopes) DO UPDATE SET ips=calculated_ip_vectors.ips+excluded.ips"""
+UNFOLD = (
+    FRESH,
+    MOVE,
+    "DELETE FROM calculated_scope_ip_last_seen g USING verdicts_touched t "
+    "WHERE g.ip_id=t.ip_id AND g.scope/2=t.scope_id",
+    "INSERT INTO calculated_scope_ip_last_seen SELECT * FROM verdicts_fresh",
+    "DELETE FROM calculated_ip_last_seen l USING (SELECT DISTINCT ip_id FROM verdicts_touched) t "
+    "WHERE l.ip_id=t.ip_id",
+    "INSERT INTO calculated_ip_last_seen(ip_id,last_seen) SELECT g.ip_id,max(g.last_seen) "
+    "FROM (SELECT DISTINCT ip_id FROM verdicts_touched) t "
+    "JOIN calculated_scope_ip_last_seen g USING(ip_id) GROUP BY 1",
+    "DELETE FROM calculated_bucket_ips m USING (SELECT DISTINCT bucket_start FROM ip_observations "
+    "WHERE run_key=ANY(%(stopped)s::bigint[]) AND bucket_start>=%(old)s "
+    "AND bucket_start<%(cut)s) b WHERE m.bucket_start=b.bucket_start",
+    "DROP TABLE verdicts_fresh",
+    "DROP TABLE verdicts_touched",
+)
 STEP = timedelta(minutes=5)  # a stored bucket
 # How far before its cutoff a fold records the runs that did not count (Counted.record()).
 RECORDED = timedelta(days=1)
@@ -92,16 +160,22 @@ class Counted:
 
     def stopped(self, state, late, until):
         """Whether a run folded under state (record()'s) may have stopped counting, given the
-        oldest late verdict (decided at `late`, before the folded buckets end at `until`): a
-        verdict changes whether runs started at or after it count, so with late in the recorded
-        day only runs started there, before until, that existed then can have stopped: those not
-        counting now that counted then."""
+        oldest late verdict (decided at `late`, before the folded buckets end at `until`)."""
+        found = self.stopped_runs(state, late, until)
+        return found is None or bool(found)
+
+    def stopped_runs(self, state, late, until):
+        """The run keys, ascending, of the runs folded under state that stopped counting (None:
+        any may have): a verdict changes whether runs started at or after it count, so with late
+        in the recorded day only runs started there, before until, that existed then can have
+        stopped: those not counting now that counted then."""
         if "since" not in state or late < datetime.fromisoformat(state["since"]):
-            return True
+            return None
         since, before = datetime.fromisoformat(state["since"]), set(state["excluded"])
-        return any(
-            k <= state["newest"] and k not in before and since <= at < until
+        return sorted(
+            k
             for k, at in self.uncounted.items()
+            if k <= state["newest"] and k not in before and since <= at < until
         )
 
     def inside(self, start, end):
@@ -134,20 +208,47 @@ def ruled(conn, counted, fold, as_of):
     """Empty both IP memos when they were folded under another country rule (counted: the
     build's Counted, its rule policy.country_verdicts(), or None without the rule; none
     recorded: without it; verdicts.same()) or, with it, a run folded then may have stopped
-    counting since (a late verdict: Counted.stopped()); record the rule, the newest verdict and
-    Counted.record() at as_of when the build folds (fold) or emptied them."""
+    counting since (a late verdict: Counted.stopped()), unless the latest build (fold) knows the
+    runs and holds an IP state: then only what they added is taken back (unfold()). Record the
+    rule, the newest verdict and Counted.record() at as_of when the build folds or emptied them."""
     rule = counted.rule if counted is not None else None
     cur = conn.cursor(row_factory=tuple_row)
     found = cur.execute(READ, (STATE,)).fetchone()
     state = found[0] if found else {"on": False}
-    emptied = not verdicts.same(state, rule)
+    emptied, stopped, cut = not verdicts.same(state, rule), [], None
     if rule and not emptied:
         late = cur.execute(LATE, (state["through"],)).fetchone()
-        emptied = late is not None and counted.stopped(state, *late)
+        stopped = counted.stopped_runs(state, *late) if late is not None else []
+        cut = _cutoff(cur, as_of) if fold and stopped else None
+        emptied = stopped is None or (bool(stopped) and cut is None)
     for statement in EMPTY if emptied else ():
         cur.execute(statement)
+    if stopped and not emptied:
+        unfold(cur, counted, stopped, cut, as_of)
     if emptied or fold:
         newest = cur.execute(NEWEST).fetchone()[0]
         record = verdicts.params(rule) | {"through": newest}
         record |= counted.record(as_of) if rule else {}
         cur.execute(WRITE, (STATE, Jsonb(record)))
+
+
+def _cutoff(cur, as_of):
+    """(cutoff, window hours) of the IP state when it can be moved to as_of, else None."""
+    state = cur.execute(ipstate.STATE).fetchall()
+    usable = len(state) == 1 and state[0][0] <= as_of
+    return (state[0][0], state[0][1]) if usable else None
+
+
+def unfold(cur, counted, stopped, cut, as_of):
+    """Take back what the stopped runs (run keys) added to the IP memos and the IP state before
+    its cutoff (cut: (cutoff, window hours), _cutoff()), counted again from the build's counted
+    runs (Counted) as the module docstring says."""
+    began, (at, hours) = time.monotonic(), cut
+    old = as_of - ipstate.KEEP
+    params = {"stopped": stopped, "old": old, "cut": at, "counted": counted.keys(old, at)}
+    params |= {"hours": hours, "prev": ipstate.starts(at, hours)}
+    pairs = cur.execute(TOUCHED, params).rowcount
+    for statement in UNFOLD:
+        cur.execute(statement, params)
+    seconds = time.monotonic() - began
+    timing.line("calculate", "ip_unfold", seconds, stopped=len(stopped), pairs=pairs)
