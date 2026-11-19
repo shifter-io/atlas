@@ -39,7 +39,8 @@ class Country:
     estimate_issue: str | None = None
     estimated: bool = False
     stopped: str | None = None  # a stop's stop_reason (budget, cell_stop): stored as measured
-    login: tuple[int, int] = (0, 0)  # its requests refused at login (HTTP 401/407) and completed
+    login: tuple[int, int] = (0, 0)  # its requests refused (HTTP 401/402/407) and completed
+    payment: int = 0  # its answers refused for payment (HTTP 402, PAUSE-402-1)
 
     def fail(self, exc: Exception) -> None:
         self.issue = f"{self.code}: not imported ({type(exc).__name__})"

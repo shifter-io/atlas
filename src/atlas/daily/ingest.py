@@ -196,6 +196,7 @@ def _convert(country: batches.Country, folder: Path, runs: Path, spool, mmdb, pr
         summary = read_json(country.directory / "summary.json")
         refused = (summary.get("errors") or {}).get(proxy_login.ERROR) or 0
         country.login = (refused, summary.get("completed") or 0)
+        country.payment = proxy_login.payments(summary.get("status_codes"))
         if proxy_login.summary_refused(summary):
             country.issue = f"{country.code}: not imported (proxy login refused)"
             return
@@ -463,19 +464,20 @@ async def _finish(hour: CampaignHour, cells: list[Cell], known: set) -> None:
 
 
 async def _login_triggers(hour: CampaignHour, cells: list[Cell]) -> None:
-    """PROXY-AUTH-PAUSE-1: a network whose daily tests here were mostly refused at login raises
-    the trigger that pauses it (orchestrator.login_pause)."""
-    from ..orchestrator.login_pause import daily_refused
+    """PROXY-AUTH-PAUSE-1: a network whose daily tests here were mostly refused at login (or for
+    payment, PAUSE-402-1) raises the trigger that pauses it (orchestrator.login_pause)."""
+    from ..orchestrator.login_pause import COUNTS, daily_refused
 
-    totals: dict[str, list] = {}
+    totals: dict[str, tuple[dict, dict]] = {}
     for cell in cells:
-        total = totals.setdefault(cell.network, [0, 0, cell.manifest])
+        counts, _ = totals.setdefault(cell.network, (dict.fromkeys(COUNTS, 0), cell.manifest))
         for country in cell.countries:
-            total[0] += country.login[0]
-            total[1] += country.login[1]
-    for refused, requests, manifest in totals.values():
-        if proxy_login.refused(refused, requests):
-            await daily_refused(hour.db, manifest, refused, requests, hour.fallback)
+            counts["refused"] += country.login[0]
+            counts["requests"] += country.login[1]
+            counts["payment"] += country.payment
+    for counts, manifest in totals.values():
+        if proxy_login.refused(counts["refused"], counts["requests"]):
+            await daily_refused(hour.db, manifest, counts, hour.fallback)
 
 
 async def store_cells(hour: CampaignHour, cells, batch: int) -> None:
