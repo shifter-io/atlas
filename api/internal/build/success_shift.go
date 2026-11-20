@@ -19,7 +19,11 @@ import (
 // it ranks itself are shifted as they are made (shiftedRankScore). A
 // previous build's score moves with its group's offset, so a delta stays the
 // network's measured change. The absolute scores (absoluteScore) are not
-// shifted.
+// shifted. A held window (snap.Window.Held(): a network not measured,
+// STANDING-FREEZE-1) is in no group: its scores are served as stored, so a
+// frozen network's never move with another network's best, and it moves no
+// group's best (as the calculation keeps it out of every peer set); a
+// network whose 30d window is held keeps its days as stored too.
 
 // bestShownScore is what the best score of a group reads.
 const bestShownScore = 10
@@ -79,7 +83,13 @@ func (sh *scoreShift) follow(group string, v *Num) {
 
 func (sh *scoreShift) product(p *snap.Product) {
 	for label, w := range p.Windows {
+		if w.Held() { // its stored scores, and no member of a group's best
+			continue
+		}
 		sh.window(p.Kind+"|"+label, w)
+	}
+	if p.Window("30d").Held() { // its days are the frozen 30d window's
+		return
 	}
 	for _, d := range p.Days {
 		if o := d.SuccessOverall; o != nil {
