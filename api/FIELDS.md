@@ -919,8 +919,8 @@ the methodology id does not change.
 | per community run: the run and the kind's networks | `/v1/runs` `successScore` |
 
 Why: a difficulty-weighted overall is a mean of target scores and reaches 10
-only for a network that is best everywhere (30d build 21: Oxylabs 8.05, offset
-+1.95), and tied leaders share the average of their ranks (16 networks tied
+only for a network that is best everywhere (30d build 21: a best of 8.05,
+offset +1.95), and tied leaders share the average of their ranks (16 networks tied
 on `google_search` block read 6.03, offset +3.97). Each overall has its own
 offset, so a shown challenge overall is not the weighted mean of the shown
 target scores unless one network leads everywhere.
@@ -1716,7 +1716,8 @@ build its values are from), ISO times, null when they do not apply. A network
 is held from the first build in which its newest request is the
 methodology's `[standing] freeze_after_hours` (3) old, whatever the reason: a
 frozen range's Atlas Score (`score`, `grade`, `rank`, `breakdown`), Success
-x/10 (`successScore`, `days[].successScore`), latency, uptime,
+x/10 (`successScore`, and `days[].successScore` on the dates the measured
+networks also have), latency, uptime,
 `downtimeMinutes`, request figures and history (`successScoreSpark`,
 `atlasScoreSpark`, the chart points) are the last published ones from before
 it stopped; its unique IPs and place counts stay the current window's. Not
@@ -1725,9 +1726,13 @@ held: its browser overall (`browserOverall.<engine>.success.score`),
 their last measured values in the snapshot, but the API shows them relative
 to the current best of their group (SUCCESS-SHIFT-1: each group's best reads
 10), so they can change while it is frozen; they feed neither the Atlas
-Score nor its rank. Known limitation: a frozen network that was a group's
-best still counts in that group's best, so it still moves the other
-networks' shown browser, challenge and per-target scores. A measured network
+Score nor its rank. Its days older than the measured networks' 30 days are
+shifted among the frozen networks alone (their best reads 10), so they can
+change too. Known limitations: a frozen network that was a group's best still
+counts in that group's best, so it still moves the other networks' shown
+browser, challenge and per-target scores; and while no measured network of
+its kind has a Success x/10 in a range, a frozen network's held one is that
+group's best and reads 10. A measured network
 that beats a frozen score passes it; a frozen network never ranks above its
 rank at the stop and is no peer of a measured network's scores. A `stopped` range
 had no earlier values to keep: no score and no rank. A range lifts once the
