@@ -71,6 +71,10 @@ ENTRY = (
 PEERS = ENTRY.replace("n->>'id'=%s", "n->>'kind'=%s")
 # The target score metrics the API shifts (api/internal/build/success_shift.go targetScores()).
 SHIFTED = ("success", "challenge", "block")
+# The headline rankings (rerank()) whose scores the API shifts, by their bests() key: the
+# challenge overall and each browser engine's overall ("browser:<engine>"); the Success x/10 is
+# shifted by the calculation itself and the Index Score never.
+SHIFTED_BY = {"challenge_overall": "challenge_overall"}
 
 
 def _time(value):
@@ -276,20 +280,44 @@ def hold(networks, previous):
 def rerank(networks):
     """Rank every headline score of each kind and window over the measured and frozen windows
     (place()): the Index Score by its rule (window_scoring.rank(): ties share the best rank), the
-    overalls by theirs (ties share the average rank, with ranked_of)."""
+    overalls by theirs (ties share the average rank, with ranked_of). The browser and challenge
+    overalls rank on the values the API serves (served()), so a rank and its served score always
+    agree."""
     peers = {}
     for entry in networks:
         for label, w in entry["windows"].items():
-            frozen = (w.get("standing") or {}).get("status") == FROZEN
+            own = w.get("standing") or {}
+            frozen = own.get("status") == FROZEN
             for key, score in _headline(w):
-                peers.setdefault((entry["kind"], label, key), []).append((score, frozen))
+                member = (score, frozen, own.get("bests") or {})
+                peers.setdefault((entry["kind"], label, key), []).append(member)
     for (_, _, key), members in peers.items():
-        if not any(frozen for _, frozen in members):
+        if not any(frozen for _, frozen, _ in members):
             continue
         balanced = key == "balanced"
-        live = [s for s, frozen in members if not frozen and _eligible(s, balanced)]
-        kept = [(s, s["rank"]) for s, frozen in members if frozen and s.get("rank") is not None]
-        place(live, kept, average=not balanced)
+        live = [s for s, frozen, _ in members if not frozen and _eligible(s, balanced)]
+        held = [(s, b) for s, frozen, b in members if frozen and s.get("rank") is not None]
+        group = SHIFTED_BY.get(key) or (key.startswith("browser:") and "browser|" + key[8:])
+        value = served(group or None, live, held)
+        place(live, [(s, s["rank"]) for s, _ in held], not balanced, value)
+
+
+def served(group, live, held):
+    """{id(score object): the score the API serves} of one ranking's live and held ((score
+    object, its window's bests)) scores: in a success shift group (group: its bests() key; None:
+    no shift) the API adds 10 minus the best live score to each live one (the best reads 10) and
+    10 minus its window's stored best to a frozen one (success_shift.go heldShift()), so a frozen
+    network keeps its last published value; without a group each its own score."""
+    out = {id(s): s["score"] for s in live} | {id(s): s["score"] for s, _ in held}
+    if group is None:
+        return out
+    best = max((s["score"] for s in live), default=None)
+    for s in live:
+        out[id(s)] = 10.0 if s["score"] == best else s["score"] + 10 - best
+    for s, bests in held:
+        if (top := bests.get(group)) is not None:
+            out[id(s)] = 10.0 if s["score"] == top else s["score"] + 10 - top
+    return out
 
 
 def _headline(window):
@@ -312,22 +340,24 @@ def _eligible(score, balanced):
     return score.get("state") in ("ready", "retained") if balanced else True
 
 
-def place(live, kept, average):
+def place(live, kept, average, value=None):
     """Rank live (score objects with a score) and kept ((score object, its rank at the stop)) in
-    place: live by score, highest first; each kept one inserted after every score above its own
-    and never above its rank at the stop. Adjacent equal scores share the best (average: the mean)
-    of their places; a kept one never ranks better than its rank at the stop. average also sets
-    ranked_of. Fewer than two (Index Score) or none (overall) change no rank."""
-    order = sorted(live, key=lambda s: -s["score"])
+    place by value ({id(score object): value}, served(); default: their scores): live highest
+    first; each kept one inserted after every value above its own and never above its rank at
+    the stop. Adjacent equal values share the best (average: the mean) of their places; a kept
+    one never ranks better than its rank at the stop. average also sets ranked_of. Fewer than two
+    (Index Score) or none (overall) change no rank."""
+    value = value or {}
+    of = {id(s): value.get(id(s), s["score"]) for s in [*live, *(s for s, _ in kept)]}
+    order = sorted(live, key=lambda s: -of[id(s)])
     floors = {}
     for score, at in sorted(kept, key=lambda k: k[1]):
-        above = sum(other["score"] > score["score"] for other in order)
+        above = sum(of[id(other)] > of[id(score)] for other in order)
         order.insert(min(max(int(at) - 1, above), len(order)), score)
         floors[id(score)] = at
     if len(order) < (1 if average else 2):
         return
-    values = [s["score"] for s in order]
-    ranks = _adjacent(values, average)
+    ranks = _adjacent([of[id(s)] for s in order], average)
     for s, rank in zip(order, ranks, strict=True):
         s["rank"] = max(rank, floors.get(id(s), rank))
         if average:

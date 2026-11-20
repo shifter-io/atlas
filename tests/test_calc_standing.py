@@ -281,3 +281,27 @@ def test_bests_are_the_apis_shift_groups():
     networks = [entry(AS_OF - 4 * HOUR)]
     standing.mark(networks, {networks[0]["id"]: source}, AS_OF, CONFIG)
     assert networks[0]["windows"]["24h"]["standing"]["bests"]["browser|camoufox"] == 7.25
+
+
+def test_shifted_overalls_rank_on_the_values_the_api_serves():
+    """A frozen browser overall of 4.5 published as 9.5 (its group's best was 5) against measured
+    9.8 and 4.6, which the API serves as 10 and 4.8: it ranks between them, so a lower rank never
+    serves a higher score; the challenge overall the same. The Success x/10 (shifted by the
+    calculation) ranks on its own scores."""
+
+    def net(network, score, frozen=False):
+        own = {"score": score, "rank": 1 if frozen else None, "ranked_of": 2}
+        w = {"browser_overall": {"camoufox": {"success": dict(own)}}}
+        w["challenge_overall"] = dict(own)
+        w["standing"] = {"status": standing.FROZEN if frozen else standing.MEASURED}
+        if frozen:
+            w["standing"]["bests"] = {"browser|camoufox": 5, "challenge_overall": 5}
+        return {"id": network, "kind": "isp", "windows": {"24h": w}}
+
+    networks = [net("a", 9.8), net("b", 4.6), net("f", 4.5, frozen=True)]
+    standing.rerank(networks)
+    browser = [n["windows"]["24h"]["browser_overall"]["camoufox"]["success"] for n in networks]
+    challenge = [n["windows"]["24h"]["challenge_overall"] for n in networks]
+    for scores in (browser, challenge):
+        ranks = [s["rank"] for s in scores]
+        assert ranks == [1, 3, 2]  # served 10, 4.8 and 9.5

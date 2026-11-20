@@ -1720,7 +1720,13 @@ scores, figures, uptime and history (`successScoreSpark` keeps the point
 scores of those values) are the last published ones from before it stopped;
 its unique IPs and place counts stay the current window's. A measured network
 that beats a frozen score passes it; a frozen network never ranks above its
-rank at the stop and is no peer of a measured network's scores. The success shift (SUCCESS-SHIFT-1, each group's best reads 10) moves a frozen range's browser, target and challenge scores by the group bests of the build its values are from (the framework's `standing.bests`), so they stay the last published ones whatever another network's best does, and a held range counts for no group's best. A `stopped`
+rank at the stop and is no peer of a measured network's scores.
+The success shift (SUCCESS-SHIFT-1, each group's best reads 10) moves a
+frozen range's browser, target and challenge scores by the group bests of
+the build its values are from (the framework's `standing.bests`), so they
+stay the last published ones whatever another network's best does, and a
+held range counts for no group's best; the framework ranks the browser and
+challenge overalls on these served values, so a rank and its score agree. A `stopped`
 range had no earlier values to keep: no score and no rank. A range lifts once
 the network is measured again in at least `lift_coverage` (90%) of the
 range's hours since the earlier of its first request in the range and the stop. `/v1/networks` rows carry the 30-day `measurementState`,

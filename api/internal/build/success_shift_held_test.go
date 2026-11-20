@@ -139,3 +139,41 @@ func TestStandingBestsDecode(t *testing.T) {
 		t.Errorf("bests %v", w.Bests)
 	}
 }
+
+// With the ranks the calculation gives (standing.py rerank(): on the served
+// values), a descending rank never serves a rising browser or challenge
+// overall while a frozen network is ranked among the measured ones.
+func TestRanksAndServedOverallsAgreeWithAFrozenNetwork(t *testing.T) {
+	ranked := func(p snap.Product, rank Num) snap.Product {
+		w := p.Windows["30d"]
+		o := w.BrowserOverall["camoufox"]
+		o.Success.Rank = rank
+		w.BrowserOverall["camoufox"] = o
+		w.ChallengeOverall.Rank = rank
+		p.Windows["30d"] = w
+		return p
+	}
+	frozen := heldProduct(4.5, true) // published as 9.5: its group's best was 5
+	frozen.Windows["30d"].Standing.Bests = bestsOf(5)
+	s := &snap.Snapshot{Products: []snap.Product{
+		ranked(heldProduct(9.8, false), 1), ranked(frozen, 2), ranked(heldProduct(4.6, false), 3),
+	}}
+	shiftSuccessScores(s)
+	reads := map[string]func(snap.Window) Num{
+		"browserOverall":   func(w snap.Window) Num { return w.BrowserOverall["camoufox"].Success.Score },
+		"challengeOverall": func(w snap.Window) Num { return w.ChallengeOverall.Score },
+	}
+	for name, read := range reads {
+		last := Num(11)
+		for i, p := range s.Products { // in rank order
+			if v := read(p.Window("30d")); v > last {
+				t.Errorf("%s: rank %d serves %v, above rank %d's %v", name, i+1, v, i, last)
+			} else {
+				last = v
+			}
+		}
+	}
+	if v := s.Products[1].Window("30d").BrowserOverall["camoufox"].Success.Score; !near(v, 9.5) {
+		t.Errorf("frozen serves %v, want its published 9.5", v)
+	}
+}
