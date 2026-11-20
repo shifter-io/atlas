@@ -1715,15 +1715,23 @@ catalog network without a snapshot product has no score or rank.
 build its values are from), ISO times, null when they do not apply. A network
 is held from the first build in which its newest request is the
 methodology's `[standing] freeze_after_hours` (3) old, whatever the reason: a
-frozen range's score, grade, rank, breakdown, success, challenge and browser
-scores, figures, uptime and history (`successScoreSpark` keeps the point
-scores of those values) are the last published ones from before it stopped;
-its unique IPs and place counts stay the current window's. A measured network
-that beats a frozen score passes it; a frozen network never ranks above its
-rank at the stop and is no peer of a measured network's scores. A `stopped`
-range had no earlier values to keep: no score and no rank. A range lifts once
-the network is measured again in at least `lift_coverage` (90%) of the
-range's hours since the earlier of its first request in the range and the stop. `/v1/networks` rows carry the 30-day `measurementState`,
+frozen range's Atlas Score (`score`, `grade`, `rank`, `breakdown`), Success
+x/10 (`successScore`, `days[].successScore`), latency, uptime,
+`downtimeMinutes`, request figures and history (`successScoreSpark`,
+`atlasScoreSpark`, the chart points) are the last published ones from before
+it stopped; its unique IPs and place counts stay the current window's. Not
+held: its browser overall (`browserOverall.<engine>.success.score`),
+`challengeScore` and per-target success, challenge and block scores keep
+their last measured values in the snapshot, but the API shows them relative
+to the current best of their group (SUCCESS-SHIFT-1: each group's best reads
+10), so they can change while it is frozen. Known limitation: a frozen
+network's score still counts in its group's best. A measured network that
+beats a frozen score passes it; a frozen network never ranks above its rank
+at the stop and is no peer of a measured network's scores. A `stopped` range
+had no earlier values to keep: no score and no rank. A range lifts once the
+network is measured again in at least `lift_coverage` (90%) of the range's
+hours since the earlier of its first request in the range and the stop.
+`/v1/networks` rows carry the 30-day `measurementState`,
 `/v1/networks/{slug}` each `ranges.<range>.measurementState` (all null on the
 all-networks answer). Every field is null for a network without a snapshot
 product, or a snapshot from before it.
