@@ -273,7 +273,7 @@ func targetNetworks(entries []*entry, targets []model.TargetMeta, kind, rangeID 
 			price = costRate(pm.Pricing)
 		}
 		net := TargetNetwork{Slug: e.P.Slug, Name: e.P.Name, Rank: score.Rank, BrowserOverall: browserOverall(w), SuccessScore: rowSuccessScore(w),
-			Cells: targetCells(w, targets, price), tried: triedTargets(sp), price: price}
+			Cells: targetCells(w, sp.Window("24h"), targets, price), tried: triedTargets(sp), price: price}
 		list = append(list, ranked{RankingRow{Name: e.P.Name, Score: score.Score}, net})
 	}
 	sort.SliceStable(list, func(i, j int) bool { return rankingLess(list[i].row, list[j].row) })
@@ -285,11 +285,11 @@ func targetNetworks(entries []*entry, targets []model.TargetMeta, kind, rangeID 
 	return out
 }
 
-// targetCells is a network's cell of every measured target in window w, its
-// cost at price ($ per GB).
-func targetCells(w snap.Window, targets []model.TargetMeta, price Num) map[string]*TargetCell {
+// targetCells is a network's cell of every measured target in window w (day:
+// its 24h window), its cost at price ($ per GB).
+func targetCells(w, day snap.Window, targets []model.TargetMeta, price Num) map[string]*TargetCell {
 	cells := make(map[string]*TargetCell, len(targets))
-	for _, b := range targetBenchmarks(w, targets) {
+	for _, b := range targetBenchmarks(w, day, targets) {
 		cell := &TargetCell{SuccessRate: b.SuccessRate, CaptchaRate: b.CaptchaRate, BlockRate: b.BlockRate, Requests: b.Requests,
 			Scores: b.Scores, NetworkBlocked: b.NetworkBlocked, CostPer1kSuccess: nan}
 		if bb := b.BrowserBenchmark; bb != nil {

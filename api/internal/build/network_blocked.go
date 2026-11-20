@@ -40,6 +40,28 @@ func refusalCounts(m snap.Metrics) (tries, refused float64, ok bool) {
 	return m.Completed.F(), refused, true
 }
 
+// rangeBlocked is target id's networkBlocked in the range of window w
+// (NETWORK-BLOCKED-2): the flag says whether the gateway refuses the target
+// now, so every range takes the latest 24 hours' verdict (window day) when it
+// is not null and read from the same engine as w's figures; else w's own by
+// the same rule. Every range ends at the build, and a refusal that began
+// inside a longer range covers only its part of the range's tries.
+func rangeBlocked(w, day snap.Window, id string) model.Bool {
+	if v := networkBlocked(day, id); v != nil && mainEngine(day, id) == mainEngine(w, id) {
+		return v
+	}
+	return networkBlocked(w, id)
+}
+
+// mainEngine is the engine whose error counts are target id's in w: a
+// browser target's main engine, "" for a network target.
+func mainEngine(w snap.Window, id string) string {
+	if b := w.Targets[id].Browser; b != nil {
+		return b.Engine
+	}
+	return ""
+}
+
 // networkBlocked is target id's networkBlocked in window w: null under
 // blockedMinTries tries (or without error categories), true when at least
 // blockedShare of them are gateway refusals and the network's other targets

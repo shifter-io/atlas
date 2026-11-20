@@ -550,7 +550,7 @@ and `pricing-history` follow the catalog load.
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks`: each check's `name` and `passed` (its text `detail` is not read, #991) | `not_measured` without a catalog value (not run by the framework) | |
 | `targets[<id>]` | one row per dataset target. `requests` comes from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90`: `generic_http`'s headline latency (normal requests, the pulses'); every other HTTP target's (`generic_https`) display-only light-load `latency_ms`, from its own successful pulses and runs outside a batch that did not run during a census, with the latency target's slot rule (null when no time slot has `[slots] min_latency_successes`, 30, of them; HTTPS-LATENCY-1). Display only: no headline, load factor, Speed or score reads it. Null on browser targets and in older snapshots (before every-request scoring, or written before HTTPS-LATENCY-1) | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
-| `targets[<id>].networkBlocked` *(added, NETWORK-BLOCKED-1)* | `true` when the network's own gateway refuses the target for our account in the window, `false` when it does not, by the rule of "Network-blocked targets" below on `w.targets[id].metrics.completed` and `.error_categories` | null under 100 tries, when every target of the network is refused, or in a snapshot without error categories; listed in `na` with `insufficient_data` (`not_measured` or `no_run_in_window` when the target has no tries) | |
+| `targets[<id>].networkBlocked` *(added, NETWORK-BLOCKED-1; every range NETWORK-BLOCKED-2)* | `true` when the network's own gateway refuses the target for our account now, `false` when it does not, by the rule of "Network-blocked targets" below on `.metrics.completed` and `.error_categories`: the latest 24 hours' verdict in every range, the range window's own when the latest 24 hours cannot tell | null under 100 tries, when every target of the network is refused, or in a snapshot without error categories; listed in `na` with `insufficient_data` (`not_measured` or `no_run_in_window` when the target has no tries) | |
 | `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `browserOverall` | the network's overall browser score per engine, from `w.browser_overall` ("Browser scores" below); not written when the snapshot has none | data | ✱ |
 | `successScore` *(added)* | the network's 1-10 success score over the 8 card targets, from `w.success_overall` ("Success scores" below); not written when the snapshot has none | data | |
@@ -686,7 +686,7 @@ network without a snapshot product keeps its catalog figure. Display only: no
 score, rank or cost reads it.
 
 **Traffic per target** (TARGET-TRAFFIC-1). `/v1/networks/{slug}`
-`ranges.<r>.targets[]` is one `{target, requests, bandwidthMb}` per target, in
+`ranges.<r>.targets[]` is one `{target, requests, bandwidthMb, networkBlocked}` per target, in
 `profile.targets[]`' order (the 11 targets), for 24h, 7d and 30d;
 `profile.targets[].bandwidthMb` is the same figure in the profile's range
 (30d). `requests` is the target's completed requests (a browser target's
@@ -706,6 +706,9 @@ over the network's product groups, as `ranges.<r>.requests`. Totals:
   total counts the group or its sources, never both. The snapshot keeps a group's figures of one engine (the one with the
   most tries), so the API adds the sources up instead; with one engine the two
   are the same.
+
+Each row also has `networkBlocked` (NETWORK-BLOCKED-2): the network's flag for the
+target in that range, as the range's `/v1/targets` cell ("Network-blocked targets").
 
 A target with no request in the range has `requests: 0` and `bandwidthMb: null`
 with `no_run_in_window`; one with requests but no recorded bytes
@@ -852,6 +855,26 @@ For a network, a target and a range (the window `w`):
   or have under 100 tries: a refusal of the whole gateway or account is not one of the
   target, and shows as outages and uptime instead.
 - `false` otherwise.
+
+Every range (NETWORK-BLOCKED-2). The flag says whether the gateway refuses the target
+now, so the 7d and 30d ranges carry the same verdict as the 24h range: the rule above on
+the 24h window. Each range ends when the answer is built, and a refusal that began inside
+a longer range covers only its part of that range's tries: one that began two days ago is
+about 2/7 of the 7d window's tries, under 0.90, while the latest 24 hours are all refused.
+Read on each range's own counts the flag would only turn true days after the refusal
+began, and stay true for days after it ended. The range window's own counts decide, by
+the same rule, only where the 24h verdict is null (under 100 tries in the latest 24 hours,
+the other targets refused too, no error categories) or counts another engine (a browser
+target whose main engine in the 24h window is not its main engine in the range). The
+range's other figures (`requests`, rates, scores) stay the range's own, so a 30d cell can
+read `true` beside a success rate that most of its days decided.
+
+The network answer carries it per range as well: `/v1/networks/{slug}`
+`ranges.<r>.targets[].networkBlocked`, the same value as that range's `/v1/targets` cell
+of the network (the same product, the network's measured product of the answer's
+category), and `profile.targets[].networkBlocked` as `ranges.30d`'s (the profile's range).
+Null on `/v1/networks/all` (`not_applicable`: a refusal is one network's), and on a
+network without a snapshot product.
 
 A browser target's error categories are its main engine's (the one with the most tries),
 so in a `/v1/targets` `engine=` body for another engine the cell's `networkBlocked` is null.

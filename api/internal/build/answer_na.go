@@ -358,10 +358,12 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 		if c, ok := changelogCode(p); ok {
 			return c
 		}
-		if a.Kind == AllNetworks && (strings.HasSuffix(p, "successScore") || strings.HasPrefix(p, "network.exclusive") || p == "network.name") {
+		if a.Kind == AllNetworks && (strings.HasSuffix(p, "successScore") || strings.HasPrefix(p, "network.exclusive") || p == "network.name" ||
+			strings.HasSuffix(p, ".networkBlocked")) {
 			// The networks' scores are ranks among them, and exclusive IPs
-			// are against the others: none for all of them; and all of them
-			// have no name of their own.
+			// are against the others: none for all of them; all of them
+			// have no name of their own, and a gateway refusal is one
+			// network's.
 			return NANotApplicable
 		}
 		return code(p)
