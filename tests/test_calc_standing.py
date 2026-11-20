@@ -84,6 +84,7 @@ def test_one_missed_hour_does_not_freeze_three_hours_do():
             "last_measured": AS_OF - 3 * HOUR,
             "frozen_since": AS_OF,
             "values_from": AS_OF - 5 * HOUR,
+            "bests": {},  # no peers given: test_bests_are_the_apis_shift_groups()
         }
     assert stopped[0]["days"] == ["frozen day"]
 
@@ -244,3 +245,39 @@ def test_a_stop_longer_than_the_window_is_not_lifted_on_its_first_hour_back():
     again[0]["windows"]["24h"]["_hours"] = standing.hours(one + day[1:2], AS_OF)
     standing.mark(again, {stopped["id"]: {"held": stopped, "measured": None}}, AS_OF, CONFIG)
     assert again[0]["windows"]["24h"]["standing"]["status"] == standing.STOPPED
+
+
+def test_bests_are_the_apis_shift_groups():
+    """A new freeze keeps the source build's best of each group the API's success shift scales
+    by (success_shift.go window()): browser overalls by engine, the challenge overall, and each
+    target's success, challenge and block by engine (an HTTP target's "http"), over the measured
+    windows of the kind; a held peer counts for none."""
+
+    def peer(browser, challenge, http, status=standing.MEASURED):
+        scores = {m: {"score": http} for m in ("success", "challenge", "block")}
+        engine = {"scores": {"success": {"score": browser}}}
+        w = {
+            "standing": {"status": status},
+            "browser_overall": {"camoufox": {"success": {"score": browser}}},
+            "challenge_overall": {"score": challenge},
+            "targets": {
+                "generic_http": {"scores": scores},
+                "x_web": {"browser": {"engine": "camoufox", "engines": {"camoufox": engine}}},
+            },
+        }
+        return {"id": "p", "kind": "residential", "windows": {"24h": w}}
+
+    peers = [peer(6.5, 4, 3), peer(7.25, None, 5), peer(9.9, 9.9, 9.9, standing.FROZEN)]
+    assert standing.bests(peers, "24h") == {
+        "browser|camoufox": 7.25,
+        "challenge_overall": 4,
+        "target|generic_http|http|success": 5,
+        "target|generic_http|http|challenge": 5,
+        "target|generic_http|http|block": 5,
+        "target|x_web|camoufox|success": 7.25,
+    }
+    source = {"held": None, "measured": {"as_of": AS_OF - 5 * HOUR, "entry": stored()}}
+    source["measured"]["peers"] = peers
+    networks = [entry(AS_OF - 4 * HOUR)]
+    standing.mark(networks, {networks[0]["id"]: source}, AS_OF, CONFIG)
+    assert networks[0]["windows"]["24h"]["standing"]["bests"]["browser|camoufox"] == 7.25

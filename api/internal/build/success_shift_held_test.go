@@ -7,9 +7,11 @@ import (
 	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
-// STANDING-FREEZE-1: a frozen network's window is in no shift group. Its
-// browser overall, target scores, challenge overall and days are served as
-// stored, whatever the other networks' best; it moves no group's best.
+// STANDING-FREEZE-1: a frozen network's window is in no shift group: it
+// moves no group's best, and its browser overall, target scores and challenge
+// overall are shifted by its own stored bests (those of the build its values
+// are from), so they serve the last published values; without bests (a
+// stopped window) they are served as stored.
 
 // heldProduct is shiftProduct with a challenge overall and, when frozen, a
 // frozen 30d window.
@@ -77,5 +79,63 @@ func TestMeasuredNetworksAreShiftedAsWithoutTheFrozenOne(t *testing.T) {
 		if w.BrowserOverall["camoufox"].Success.Score != v.BrowserOverall["camoufox"].Success.Score {
 			t.Errorf("network %d: %v, want %v", i, w.BrowserOverall, v.BrowserOverall)
 		}
+	}
+}
+
+// bestsOf is the calculation's standing.bests of heldProduct windows whose
+// scores' best is best (calculated/standing.py bests()).
+func bestsOf(best Num) map[string]Num {
+	out := map[string]Num{"browser|camoufox": best, "challenge_overall": best}
+	for _, metric := range []string{"success", "challenge", "block"} {
+		for _, group := range []string{"google_search|camoufox", "generic_http|http"} {
+			out["target|"+group+"|"+metric] = best
+		}
+	}
+	return out
+}
+
+// servedScores is what a window's shifted scores serve, standing aside.
+func servedScores(t *testing.T, p snap.Product) string {
+	t.Helper()
+	w := p.Window("30d")
+	b, err := json.Marshal([]any{w.BrowserOverall, w.Targets, w.ChallengeOverall, w.SuccessOverall})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// The served value at the first frozen build equals the last measured
+// build's: the frozen window is shifted by the bests of the build its values
+// are from, not by the current group's, and holds while the best moves.
+func TestAFrozenNetworkServesItsLastPublishedScores(t *testing.T) {
+	measured := &snap.Snapshot{Products: []snap.Product{heldProduct(8, false), heldProduct(6, false), heldProduct(7, false)}}
+	shiftSuccessScores(measured)
+	published := servedScores(t, measured.Products[2])
+	if got := measured.Products[2].Window("30d").BrowserOverall["camoufox"].Success.Score; !near(got, 9) {
+		t.Fatalf("published %v, want 7 + 10 - 8", got)
+	}
+	for _, best := range []Num{7.5, 9.5} { // the measured best falls, then rises past it
+		frozen := heldProduct(7, true)
+		frozen.Windows["30d"].Standing.Bests = bestsOf(8)
+		s := &snap.Snapshot{Products: []snap.Product{heldProduct(best, false), heldProduct(6, false), frozen}}
+		shiftSuccessScores(s)
+		if got := servedScores(t, s.Products[2]); got != published {
+			t.Errorf("best %v: frozen serves\n%s\nwant the last published\n%s", best, got, published)
+		}
+		if got := s.Products[0].Window("30d").BrowserOverall["camoufox"].Success.Score; got != 10 {
+			t.Errorf("best %v: the measured best reads %v, want 10 (the frozen one is no member)", best, got)
+		}
+	}
+}
+
+// The calculation's bests decode as the API reads them.
+func TestStandingBestsDecode(t *testing.T) {
+	var w snap.WindowStanding
+	if err := json.Unmarshal([]byte(`{"status":"frozen","bests":{"browser|camoufox":8.25,"target|generic_http|http|success":null}}`), &w); err != nil {
+		t.Fatal(err)
+	}
+	if w.Bests["browser|camoufox"] != 8.25 || w.Bests["target|generic_http|http|success"].OK() {
+		t.Errorf("bests %v", w.Bests)
 	}
 }

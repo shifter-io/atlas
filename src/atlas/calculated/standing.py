@@ -67,6 +67,10 @@ ENTRY = (
     "SELECT n FROM calculated_snapshots s, jsonb_array_elements(coalesce(s.payload->'networks',"
     "'[]')) n WHERE s.build_id=%s AND n->>'id'=%s"
 )
+# The networks of one kind in one build: the peers whose best the API shifts by (bests()).
+PEERS = ENTRY.replace("n->>'id'=%s", "n->>'kind'=%s")
+# The target score metrics the API shifts (api/internal/build/success_shift.go targetScores()).
+SHIFTED = ("success", "challenge", "block")
 
 
 def _time(value):
@@ -114,13 +118,14 @@ def sources(conn, as_of, config):
 
 
 def _measured(cursor, builds, network, limit):
-    """{"as_of", "entry"} of the newest of builds in which network's newest request was less
-    than limit before its cutoff, or None."""
+    """{"as_of", "entry", "peers"} of the newest of builds in which network's newest request was
+    less than limit before its cutoff (peers: that build's networks of its kind), or None."""
     for build_id, built in builds:
         row = cursor.execute(ENTRY, (build_id, network)).fetchone()
         last = row and last_measured(row[0])
         if last is not None and built - last < limit:
-            return {"as_of": built, "entry": row[0]}
+            peers = [p for (p,) in cursor.execute(PEERS, (build_id, row[0]["kind"]))]
+            return {"as_of": built, "entry": row[0], "peers": peers}
     return None
 
 
@@ -172,7 +177,9 @@ def _kept(source, label, stopped, cover, as_of):
     if not window:
         return None, _label(STOPPED, None, as_of), []
     values_from = _time(measured["as_of"])
-    return window, _label(FROZEN, None, as_of, values_from), measured["entry"].get("days", [])
+    found = bests(measured.get("peers", ()), label)
+    own = _label(FROZEN, None, as_of, values_from) | {"bests": found}
+    return window, own, measured["entry"].get("days", [])
 
 
 def _covered(cover, held, as_of):
@@ -190,6 +197,38 @@ def _covered(cover, held, as_of):
         back = math.ceil((as_of - min(found)).total_seconds() / 3600)
         span = max(span, min(hours, back))
     return measured >= share * span
+
+
+def bests(peers, label):
+    """{group: best score} of the measured windows label of peers (one build's networks of one
+    kind), by the API's success shift groups (SUCCESS-SHIFT-1, success_shift.go window()), each
+    the group's key without the kind and range: "browser|<engine>" (a browser overall),
+    "challenge_overall" and "target|<target>|<engine>|<metric>" (an HTTP target's engine
+    "http"). A frozen window keeps them (its standing's "bests"), so the API shifts its stored
+    scores as it shifted them when they were published, and serves its last published values."""
+    found = {}
+
+    def add(key, score):
+        if score is not None:
+            found[key] = max(found.get(key, score), score)
+
+    for entry in peers:
+        w = entry["windows"].get(label)
+        if not w or (w.get("standing") or {}).get("status") in HELD:
+            continue
+        for engine, own in (w.get("browser_overall") or {}).items():
+            add(f"browser|{engine}", (own.get("success") or {}).get("score"))
+        add("challenge_overall", (w.get("challenge_overall") or {}).get("score"))
+        for target, t in w["targets"].items():
+            groups = [("http", t.get("scores"))]
+            if b := t.get("browser"):
+                groups.append((b["engine"], b.get("scores")))
+                groups += [(e, own.get("scores")) for e, own in b.get("engines", {}).items()]
+            for engine, scores in groups:
+                for metric in SHIFTED:
+                    score = ((scores or {}).get(metric) or {}).get("score")
+                    add(f"target|{target}|{engine}|{metric}", score)
+    return found
 
 
 def _label(status, last, since=None, values_from=None):

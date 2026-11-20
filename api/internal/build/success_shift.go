@@ -1,6 +1,8 @@
 package build
 
 import (
+	"strings"
+
 	"github.com/shifter-io/atlas/api/internal/model"
 	"github.com/shifter-io/atlas/api/internal/snap"
 )
@@ -20,10 +22,12 @@ import (
 // previous build's score moves with its group's offset, so a delta stays the
 // network's measured change. The absolute scores (absoluteScore) are not
 // shifted. A held window (snap.Window.Held(): a network not measured,
-// STANDING-FREEZE-1) is in no group: its scores are served as stored, so a
-// frozen network's never move with another network's best, and it moves no
-// group's best (as the calculation keeps it out of every peer set); a
-// network whose 30d window is held keeps its days as stored too.
+// STANDING-FREEZE-1) is in no group: it moves no group's best (as the
+// calculation keeps it out of every peer set), and a frozen one is shifted by
+// the group bests of the build its values are from (heldShift()), so it
+// serves its last published values whatever the other networks' best; a
+// network whose 30d window is held keeps its days as stored (the calculation
+// shifts them).
 
 // bestShownScore is what the best score of a group reads.
 const bestShownScore = 10
@@ -83,7 +87,10 @@ func (sh *scoreShift) follow(group string, v *Num) {
 
 func (sh *scoreShift) product(p *snap.Product) {
 	for label, w := range p.Windows {
-		if w.Held() { // its stored scores, and no member of a group's best
+		if w.Held() { // no member of a group's best: shifted by its own bests
+			if sh.apply {
+				heldShift(p.Kind+"|"+label, w.Standing).window(p.Kind+"|"+label, w)
+			}
 			continue
 		}
 		sh.window(p.Kind+"|"+label, w)
@@ -128,6 +135,25 @@ func (sh *scoreShift) window(scope string, w snap.Window) {
 	if o := w.ChallengeOverall; o != nil {
 		sh.member("challenge_overall|"+scope, &o.Score, &o.PreviousScore)
 	}
+}
+
+// heldShift is a held window's own shift: the group bests of the build its
+// values are from (standing.bests, calculated/standing.py bests()), keyed
+// without its kind and range (scope), so its stored scores are shifted as
+// they were when published; none without them (a stopped window).
+func heldShift(scope string, s *snap.WindowStanding) *scoreShift {
+	sh := &scoreShift{best: map[string]Num{}, apply: true}
+	for key, best := range s.Bests {
+		switch {
+		case strings.HasPrefix(key, "browser|"):
+			sh.best["browser|"+scope+"|"+strings.TrimPrefix(key, "browser|")] = best
+		case key == "challenge_overall":
+			sh.best["challenge_overall|"+scope] = best
+		case strings.HasPrefix(key, "target|"):
+			sh.best[scope+"|"+strings.TrimPrefix(key, "target|")] = best
+		}
+	}
+	return sh
 }
 
 // overallTarget shifts target id's score in the overall o (nil: none) as
