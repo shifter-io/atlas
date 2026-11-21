@@ -86,3 +86,57 @@ func TestNetworkBlockedEngineView(t *testing.T) {
 		t.Errorf("a network target in an engine view: networkBlocked = %s, want false", got)
 	}
 }
+
+// blockedProduct is a product whose target x the gateway refuses in the
+// last 24 hours (day) and whose 7d and 30d windows are long.
+func blockedProduct(day, long snap.TargetResult) *snap.Product {
+	window := func(x snap.TargetResult, y float64) snap.Window {
+		w := snap.EmptyWindow()
+		w.Targets = map[string]snap.TargetResult{"x": x, "y": blockedTarget(y, 0, 0)}
+		return w
+	}
+	return &snap.Product{Windows: map[string]snap.Window{"24h": window(day, 500), "7d": window(long, 3500), "30d": window(long, 15000)}}
+}
+
+// NETWORK-BLOCKED-2: every range takes the last 24 hours' verdict, so a
+// refusal that began inside a longer range marks it too, on /v1/targets and
+// on the network answer's ranges alike; the range's own counts decide when
+// the last 24 hours cannot tell or count another engine.
+func TestNetworkBlockedEveryRange(t *testing.T) {
+	chrome := func(r snap.TargetResult, engine string) snap.TargetResult {
+		r.Browser = &snap.BrowserResult{Engine: engine}
+		return r
+	}
+	cases := []struct {
+		name string
+		p    *snap.Product
+		want map[string]string
+	}{
+		{"refused since two days", blockedProduct(blockedTarget(200, 200, 0), blockedTarget(700, 200, 0)),
+			map[string]string{"24h": "true", "7d": "true", "30d": "true"}},
+		{"refused no longer", blockedProduct(blockedTarget(200, 0, 0), blockedTarget(700, 650, 0)),
+			map[string]string{"24h": "false", "7d": "false", "30d": "false"}},
+		{"too few tries today", blockedProduct(blockedTarget(50, 50, 0), blockedTarget(700, 650, 0)),
+			map[string]string{"24h": "null", "7d": "true", "30d": "true"}},
+		{"another engine today", blockedProduct(chrome(blockedTarget(200, 200, 0), "chrome"), chrome(blockedTarget(700, 200, 0), "camoufox")),
+			map[string]string{"24h": "true", "7d": "false", "30d": "false"}},
+	}
+	targets := []model.TargetMeta{{ID: "x"}, {ID: "y"}}
+	for _, c := range cases {
+		e := &entry{P: &model.Provider{Slug: "n"}, Snap: map[string]*snap.Product{"residential": c.p}}
+		ans := &NetworkAnswer{Ranges: map[string]*RangeTotals{}}
+		for r := range c.want {
+			ans.Ranges[r] = &RangeTotals{Targets: []TargetTraffic{{Target: "x"}}}
+		}
+		rangesBlocked(ans, c.p)
+		for r, want := range c.want {
+			cell := targetNetworks([]*entry{e}, targets, "residential", r)[0].Cells["x"]
+			if got := blockedFlag(cell.NetworkBlocked); got != want {
+				t.Errorf("%s, %s: cell networkBlocked = %s, want %s", c.name, r, got, want)
+			}
+			if got := blockedFlag(ans.Ranges[r].Targets[0].NetworkBlocked); got != want {
+				t.Errorf("%s, %s: ranges networkBlocked = %s, want %s", c.name, r, got, want)
+			}
+		}
+	}
+}

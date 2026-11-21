@@ -161,7 +161,8 @@ func hardestRates(c *Context, rows []RankingRow, t model.TargetMeta, rangeID str
 		if e == nil || e.Snap[e.P.PrimaryKind] == nil {
 			continue
 		}
-		b := targetBenchmarks(e.Snap[e.P.PrimaryKind].Window(rangeID), []model.TargetMeta{t})[0]
+		sp := e.Snap[e.P.PrimaryKind]
+		b := targetBenchmarks(sp.Window(rangeID), sp.Window("24h"), []model.TargetMeta{t})[0]
 		if !b.SuccessRate.OK() {
 			continue
 		}

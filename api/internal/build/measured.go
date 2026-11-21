@@ -60,7 +60,7 @@ func measuredBlock(p *snap.Product, ref float64, targets []model.TargetMeta, pee
 	meas.Performance = performanceStats(w, day)
 	meas.Pricing = measuredPricing(p, w.Metrics)
 	meas.Trust = trustSignals(w)
-	meas.Targets = targetBenchmarks(w, targets)
+	meas.Targets = targetBenchmarks(w, day, targets)
 	meas.BrowserOverall = browserOverall(w)
 	meas.SuccessScore = successScore(w)
 	meas.Series = providerSeries(w, day, ref)

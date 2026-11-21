@@ -72,7 +72,9 @@ func trustSignals(w snap.Window) model.TrustSignals {
 	return trust
 }
 
-func targetBenchmarks(w snap.Window, targets []model.TargetMeta) []model.TargetBenchmark {
+// targetBenchmarks is every target's benchmark in window w; day is the same
+// product's 24h window, the latest verdict of networkBlocked (rangeBlocked).
+func targetBenchmarks(w, day snap.Window, targets []model.TargetMeta) []model.TargetBenchmark {
 	out := make([]model.TargetBenchmark, 0, len(targets))
 	for _, t := range targets {
 		tr, has := w.Targets[t.ID]
@@ -80,7 +82,7 @@ func targetBenchmarks(w snap.Window, targets []model.TargetMeta) []model.TargetB
 		if has {
 			r := tr.Metrics
 			b.SuccessRate, b.CaptchaRate, b.BlockRate = r.SuccessRate, r.ChallengeRate, r.BlockRate
-			b.Requests, b.NetworkBlocked = r.Completed, networkBlocked(w, t.ID)
+			b.Requests, b.NetworkBlocked = r.Completed, rangeBlocked(w, day, t.ID)
 			if lat, ok := targetLatency(t, tr, r); ok {
 				b.LatencyP50, b.LatencyP90 = lat.P50, lat.P90
 			}

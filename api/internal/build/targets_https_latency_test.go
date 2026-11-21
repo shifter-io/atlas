@@ -31,7 +31,7 @@ var httpsTargets = []model.TargetMeta{
 // latencyP50 ("" when it has a value).
 func httpsCellNA(t *testing.T, w snap.Window) (map[string]*TargetCell, string) {
 	t.Helper()
-	cells := targetCells(w, httpsTargets, 4)
+	cells := targetCells(w, w, httpsTargets, 4)
 	a := &TargetsAnswer{Networks: []TargetNetwork{{Slug: "a", Cells: cells,
 		tried: map[string]bool{"generic_http": true, "generic_https": true}, price: 4}}}
 	if err := a.listNA(""); err != nil {
@@ -79,7 +79,7 @@ func TestTargetBenchmarksShowTheDisplayLatency(t *testing.T) {
 	t.Parallel()
 	w := httpsWindow(t, `{"completed": 100, "latency_ms": {"p50": 1250, "p90": 2500}, "time_slots": {"latency": 1}}`)
 	browser := model.TargetMeta{ID: "generic_https", Source: model.SourceMeasured, Engine: model.S(model.EngineBrowser)}
-	got := targetBenchmarks(w, append(httpsTargets, browser))
+	got := targetBenchmarks(w, w, append(httpsTargets, browser))
 	if got[1].LatencyP50 != 1250 || got[1].LatencyP90 != 2500 || got[0].LatencyP50 != 1000 {
 		t.Errorf("benchmarks %+v", got[:2])
 	}
