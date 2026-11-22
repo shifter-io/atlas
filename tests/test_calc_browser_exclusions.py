@@ -24,12 +24,13 @@ ENTRY = re.compile(r"^  \{ target = .*\},$", re.M)
 
 
 def excluding(tmp_path, started):
-    """The lenient methodology whose one exclusion holds the run that started at `started`."""
+    """The lenient methodology whose one exclusion holds only the run that started at `started`
+    (the fixture starts every network's runs within the same second)."""
     policy = lenient_policy(tmp_path)
-    second = timedelta(seconds=1)
+    tick = timedelta(microseconds=1)
     entry = (
         f'  {{ target = "amazon_pdp", engine = "camoufox", started_from = '
-        f'"{(started - second).isoformat()}", started_before = "{(started + second).isoformat()}"'
+        f'"{started.isoformat()}", started_before = "{(started + tick).isoformat()}"'
         ', reason = "test" },'
     )
     text, found = ENTRY.subn(entry, policy.read_text())
@@ -61,6 +62,9 @@ async def test_both_modes_leave_out_the_excluded_run_and_only_it(database, tmp_p
     await add_runs(database, tmp_path)
     with connect(database) as conn:
         (started,) = conn.execute(STARTED, ("alpha", "amazon_pdp")).fetchone()
+        others = STARTED.replace("p.provider=%s", "p.provider<>%s")
+        others = {row[0] for row in conn.execute(others, ("alpha", "amazon_pdp"))}
+    assert len(others) == 2 and started not in others  # the span holds alpha's run only
     policy = lenient_policy(tmp_path)
     before = figures(calculate(database, policy, as_of=as_of))
     assert len(before) == len(PATTERNS) * 3 * len(TARGETS)
