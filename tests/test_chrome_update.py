@@ -129,7 +129,7 @@ def test_a_missing_chrome_is_installed(mini):
     assert mini.version() == "158.0.8127.37"
 
 
-@pytest.mark.parametrize("version", ["158.0.8127.37", "158.0.8127.40", "159.0.1.1"])
+@pytest.mark.parametrize("version", ["158.0.8127.37", "158.0.8127.40", "159.0.8154.1"])
 def test_a_current_or_newer_chrome_is_left_alone(mini, version):
     mini.install(version)
     result = mini.run()
@@ -173,7 +173,7 @@ def test_it_waits_for_a_gap_between_chromes_and_gives_up_after_wait(mini):
     assert mini.version() == "158.0.8127.37" and mini.calls("sleep") == [["2"], ["2"]]
 
     mini.set("busy", "99")
-    mini.set("offered", "159.0.1.1")
+    mini.set("offered", "159.0.8154.1")
     result = mini.run("--wait", "4")
     assert result.returncode == 3
     assert "busy: Chrome ran for 4 s; Chrome 158.0.8127.37 kept, update later" in result.stdout

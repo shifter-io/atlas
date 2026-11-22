@@ -44,12 +44,12 @@ ANSWER = {
 def test_the_current_stable_is_the_newest_major_served_to_most_users():
     assert stable_major(ANSWER) == 158
     # 158 not yet to most users: 157 is the current one.
-    assert stable_major({"releases": ANSWER["releases"][:3] + [release("157.0.1.2", 1)]}) == 157
-    assert stable_major({"releases": [release("159.0.1.1", 0.5)]}) == 159
+    assert stable_major({"releases": ANSWER["releases"][:3] + [release("157.0.8103.2", 1)]}) == 157
+    assert stable_major({"releases": [release("159.0.8154.1", 0.5)]}) == 159
 
 
 @pytest.mark.parametrize(
-    "answer", [{}, [], None, {"releases": None}, {"releases": [release("158.0.1.1", 0.2)]}]
+    "answer", [{}, [], None, {"releases": None}, {"releases": [release("158.0.8127.1", 0.2)]}]
 )
 def test_an_answer_naming_no_current_stable_gives_none(answer):
     assert stable_major(answer) is None
@@ -57,7 +57,7 @@ def test_an_answer_naming_no_current_stable_gives_none(answer):
 
 @pytest.mark.parametrize(
     "item",
-    ["158.0.1.1", {"version": 158, "fraction": 1}, {"version": "158.0"}, release("x.0", 1)],
+    ["158.0.8127.1", {"version": 158, "fraction": 1}, {"version": "158.0"}, release("x.0", 1)],
 )
 def test_a_malformed_release_counts_for_nothing(item):
     assert served_major(item) is None
@@ -136,7 +136,7 @@ def test_a_refresh_reads_both_majors_and_keeps_the_last_stable(monkeypatch, capl
 
 def test_only_an_outdated_chrome_run_of_a_current_chrome_target_is_refused(monkeypatch):
     amazon, search = registry.get("amazon_pdp"), registry.get("google_search")
-    current = watch(monkeypatch, "157.0.1.2", [158])
+    current = watch(monkeypatch, "157.0.8103.2", [158])
     current.check(amazon, "chrome")  # nothing known yet: nothing refused
     current.refresh()
     with pytest.raises(Outdated, match=r"^chrome_outdated: Chrome 157, current Stable 158$"):
@@ -148,7 +148,7 @@ def test_only_an_outdated_chrome_run_of_a_current_chrome_target_is_refused(monke
 
 
 async def test_the_loop_refreshes_until_stopped_and_survives_a_failed_pass(monkeypatch, caplog):
-    current = watch(monkeypatch, "158.0.1.2", [158])
+    current = watch(monkeypatch, "158.0.8127.2", [158])
 
     def broken(os_name):
         current.fetch = lambda os_name: 159
