@@ -40,6 +40,9 @@ BROWSER_REGION = "browser"
 BROWSER_REGION_ID = 20
 BROWSER_REGION_CLOUD = "local"
 BROWSER_REGION_PATTERN = r"browser(-[a-z0-9]+)?"
+# The error a host reports for a run it refused because its Chrome is behind the current Stable
+# major (browser/chrome_current.py, CHROME-CURRENT-1): not measured, alerted by the manager.
+CHROME_OUTDATED = "chrome_outdated"
 # The logical name a host registers with (browser-1, browser-2, ...), never its machine name.
 HOST_NAME_PATTERN = r"browser-[a-z0-9]+"
 

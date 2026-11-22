@@ -19,6 +19,11 @@ each raises the alert browser_run_abandoned (major, one per host and UTC day, it
 count the runs). The node is told to stop at its next progress post, unless the run was failed
 only for its silence (stale, not_started) and its deadline has not passed: then it may finish and
 upload late (nodework._finishing, BROWSER-COVERAGE-1).
+
+A browser run its host refused because the host's Chrome is behind the current Stable major
+(browser/chrome_current.py, CHROME-CURRENT-1; error `chrome_outdated: ...`, not measured)
+raises the alert browser_chrome_outdated (major, one per host and UTC day, its occurrences count
+the runs) when its node reports it failed (nodework.fail_run).
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ OPEN_AHEAD = timedelta(minutes=2)  # a queue entry's batch opens this long befor
 NEVER = datetime.min.replace(tzinfo=UTC)  # a cutoff no run starts before
 OVER_ALERT = "browser_host_over_limit"
 ABANDONED_ALERT = "browser_run_abandoned"
+OUTDATED_ALERT = "browser_chrome_outdated"
 REASONS = {"stale": "made no progress", "deadline": "passed its deadline"}
 
 
@@ -107,4 +113,19 @@ async def abandoned(conn: psycopg.AsyncConnection, batch_id: int, run: dict, now
         severity="major",
         dedupe_key=f"{ABANDONED_ALERT}:{host}:{day}",
         data={"host": host, "batch_id": batch_id, "error": run["error"]},
+    )
+
+
+async def chrome_outdated(
+    conn: psycopg.AsyncConnection, node: dict, batch_id: int, error: str, now: datetime
+) -> None:
+    """The alert of a browser run its host refused for an outdated Chrome."""
+    host, day = node.get("host") or f"node {node['node_id']}", now.date().isoformat()
+    await raise_alert(
+        conn,
+        OUTDATED_ALERT,
+        f"{host}: browser run {batch_id} not measured ({error}); update its Chrome",
+        severity="major",
+        dedupe_key=f"{OUTDATED_ALERT}:{host}:{day}",
+        data={"host": host, "batch_id": batch_id, "error": error},
     )

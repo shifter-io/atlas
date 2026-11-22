@@ -41,6 +41,9 @@ class PageTarget(BrowserTarget):
     # or with SHOWN_OK an ok right after the 407 step.
     SHOWN_UNREAD: ClassVar[tuple[str, ...]] = ("title", "text_head")
     SHOWN_OK: ClassVar[bool] = False
+    # Runs on Chrome only while the host's Chrome is the current Stable major: the site answers
+    # an older one with its bot check (browser/chrome_current.py, CHROME-CURRENT-1).
+    CURRENT_CHROME: ClassVar[bool] = False
 
     def page(self, context: RequestContext, inputs: tuple[Any, ...]) -> PageSpec:
         value = choose(context, inputs)

@@ -12,7 +12,7 @@ from browser_targets_cases import (
 
 from atlas.browser import contracts as c
 from atlas.browser import judge as j
-from atlas.targets import registry
+from atlas.targets import PageView, registry
 
 CASES = cases(c.AMAZON_PDP)
 
@@ -60,3 +60,19 @@ def test_the_dogs_error_pages_end_the_wait():
     marks no block: the 404 page of an unknown ASIN has it too (fixture not_found)."""
     spec = registry.get(c.AMAZON_PDP).page(context(0), ("0000000000",))
     assert DOGS_LINK in j.selectors(spec.wait_for)
+
+
+def test_the_framed_robot_check_at_checkpoint_is_a_challenge():
+    """CHROME-CURRENT-1: Amazon's /checkpoint/continue frames its robot check; it was counted
+    as no_content (no_product). A challenge now, which changes no success rate."""
+    target = registry.get(c.AMAZON_PDP)
+    framed = PageView("https://www.amazon.com/checkpoint/continue", 200, "Amazon.com", "")
+    assert target.judge(framed) == j.failed("challenge", "captcha_page")
+    for path in ("/checkpoint", "/checkpointing/x", "/gp/checkpoint/continue"):
+        view = PageView(f"https://www.amazon.com{path}", 200, "Amazon.com", "")
+        assert target.judge(view) == j.failed("no_content", "no_product")
+
+
+def test_amazon_runs_only_on_the_current_chrome():
+    assert registry.get(c.AMAZON_PDP).CURRENT_CHROME
+    assert not any(registry.get(t).CURRENT_CHROME for t in c.PAGE_TARGETS if t != c.AMAZON_PDP)

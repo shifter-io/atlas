@@ -177,6 +177,11 @@ class Rejected(Exception):
     """The orchestrator refused a request for good (4xx): do not retry."""
 
 
+class RunRefused(Exception):
+    """The node refuses a run at its start; str() is the error it reports (no upload, so
+    nothing judges or counts it)."""
+
+
 @dataclass
 class Active:
     assignment: dict[str, Any]
@@ -519,6 +524,9 @@ class NodeAgent:
 
                 await asyncio.to_thread(enrich_run, directory, self.mmdb)
             await self.upload(batch_id, directory)
+        except RunRefused as exc:
+            log.warning("batch %s refused: %s", batch_id, exc)
+            await self._fail(batch_id, str(exc))
         except Rejected as exc:
             log.warning("batch %s: %s", batch_id, exc)
         except Exception as exc:  # boundary: fails only this batch; the type only (secrets)

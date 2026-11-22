@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The browser mini's Chrome update (scripts/chrome-update.sh, CHROME-CURRENT-1) as a launchd
+  agent, every hour and at load. Copy it to ~/Library/LaunchAgents/atlas.chrome-update.plist of
+  the account that owns /Applications/Google Chrome.app (an administrator: the update writes in
+  /Applications), replace every __PLACEHOLDER__ and load it with
+  `launchctl bootstrap gui/$(id -u) <plist>` (docs/browser.html, "Keeping Chrome current").
+  Placeholders only: no user, host or path belongs in the repository.
+    __CHECKOUT__    the repository checkout (the same one the browser node runs from)
+    __STATE__       the browser node's state directory (its logs/ folder holds this agent's logs)
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>atlas.chrome-update</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__CHECKOUT__/scripts/chrome-update.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>3600</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__STATE__/logs/chrome-update.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__STATE__/logs/chrome-update.err.log</string>
+</dict>
+</plist>

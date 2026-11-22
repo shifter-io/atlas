@@ -165,6 +165,15 @@ def asset_cache_reset():
 
 
 @pytest.fixture(autouse=True)
+def no_chrome_stable_fetch(monkeypatch):
+    """No test asks Google for the current Chrome Stable (browser/chrome_current.py): a host's
+    Watch reads none, so it refuses nothing unless the test sets the majors."""
+    from atlas.browser import chrome_current
+
+    monkeypatch.setattr(chrome_current, "fetch_stable_major", lambda os_name: None)
+
+
+@pytest.fixture(autouse=True)
 def store_in_threads(monkeypatch):
     """The parallel store's connections are threads of the test's own process (P = 1) unless a
     test asks for processes (storage_parallel's tests do): a test's monkeypatched storage

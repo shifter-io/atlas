@@ -20,6 +20,7 @@ class AmazonPdp(PageTarget):
 
     id: str = AMAZON_PDP
     url: str = "https://www.amazon.com/dp/"
+    version: str = "2"  # /checkpoint/ marks a challenge (CHROME-CURRENT-1)
 
     TITLE = "#productTitle"
     PRICES = (
@@ -48,7 +49,8 @@ class AmazonPdp(PageTarget):
                 "we just need to make sure you",
                 "to discuss automated access to amazon data",
             ),
-            paths=("/errors/validatecaptcha",),
+            # /checkpoint/continue frames the same check ("click the 'continue shopping' button").
+            paths=("/errors/validatecaptcha", "/checkpoint/"),
             found=(CAPTCHA_FORM,),
         ),
         # The "dogs" error page Amazon serves to refused clients, by its own title: a plain
@@ -56,6 +58,9 @@ class AmazonPdp(PageTarget):
         Mark("blocked", "dogs_page", text=("sorry! something went wrong",)),
     )
     BLOCK_STATUSES = frozenset({503})
+    # Amazon answers nearly every try from a Chrome behind the current Stable major with its
+    # robot check (22 Nov 2026: 2-4% ok when claiming 156 or 157, 76% as the current 158).
+    CURRENT_CHROME = True
 
     def address(self, value: Any) -> str:
         return f"{self.url}{quote(value, safe='')}"

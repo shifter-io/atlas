@@ -13,7 +13,7 @@ from test_browser_settings import write
 from atlas.browser.settings import load_settings
 from atlas.orchestrator import browser, nodework
 from atlas.orchestrator.browser import browser_plan
-from atlas.orchestrator.browser_hosts import ABANDONED_ALERT, OVER_ALERT
+from atlas.orchestrator.browser_hosts import ABANDONED_ALERT, OUTDATED_ALERT, OVER_ALERT
 from atlas.orchestrator.browser_queue import EPOCH, queues
 from atlas.orchestrator.db import Database
 from atlas.orchestrator.nodes import issue_token
@@ -174,3 +174,26 @@ async def test_slots_mode_has_no_deadline_cutoff_only_the_stall_rule(database, d
     await nodework.progress(db, node, batch, {"requests": 50}, t + 199 * MINUTE)
     assert await nodework.reap(db, t + 200 * MINUTE) == {"failed": {}, "closed": 0}
     assert run(database, batch)[0] == "running"
+
+
+async def test_a_run_refused_for_an_outdated_chrome_alerts_once_a_day_per_host(
+    database, db, tmp_path
+):
+    settings, entries, nodes, _ = setup(database, tmp_path)
+    error = "chrome_outdated: Chrome 157, current Stable 158"
+    batches = []
+    for entry in entries[:2]:
+        node, batch = await started(db, database, settings, nodes, entry)
+        node = node | {"host": "browser-1"}  # as the API's node row has it
+        assert await nodework.fail_run(db, node, batch, error, entry.start) == "failed"
+        assert run(database, batch)[:2] == ("failed", error)
+        batches.append(batch)
+    message = f"browser-1: browser run {batches[1]} not measured ({error}); update its Chrome"
+    day = entries[0].start.date().isoformat()
+    assert query(database, ALERTS, (OUTDATED_ALERT,)) == [
+        (f"{OUTDATED_ALERT}:browser-1:{day}", message, 2, True)
+    ]
+    # Any other failure a node reports raises no such alert.
+    node, batch = await started(db, database, settings, nodes, entries[2])
+    await nodework.fail_run(db, node, batch, "node error (OSError)", entries[2].start)
+    assert len(query(database, ALERTS, (OUTDATED_ALERT,))) == 1
