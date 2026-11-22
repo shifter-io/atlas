@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from typing import Any, Protocol
 
+from . import refusals as refused
 from .models import RunSummary
 
 
@@ -19,6 +20,9 @@ class ResultSink(Protocol):
     def geo(self, rows: list[dict[str, Any]]) -> None: ...
     def finish(self, summary: RunSummary) -> None: ...
     def abort(self) -> None: ...
+
+    # Optional: `refusals(rows)` keeps the run's refused-answer samples (refusals.py), called
+    # before finish only when there are some; a sink without it keeps none.
 
 
 class JsonSink:
@@ -61,6 +65,11 @@ class JsonSink:
             self._geo_stream.write(json.dumps(row, separators=(",", ":")) + "\n")
             self._geo_rows += 1
         self._geo_stream.flush()
+
+    def refusals(self, rows: list[dict[str, Any]]) -> None:
+        """refusals.FILE beside the IP file; it is not listed in the summary's artifacts."""
+        assert self.directory is not None
+        refused.write(self.directory, rows)
 
     def _publish(self, name: str, stream, rows: int) -> dict[str, Any]:
         stream.close()

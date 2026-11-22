@@ -20,6 +20,7 @@ from .answers import Answers
 from .models import Outcome, RequestContext, RunConfig, RunSummary, protocol_of
 from .node_dns import DnsFailures
 from .process_transport import ProcessTransport, process_count
+from .refusals import Refusals
 from .sinks import JsonSink, ResultSink
 from .slices import Slices
 from .stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, bucket_of, iso
@@ -198,6 +199,7 @@ class _RunState:
     parallel: bool
     dns_retry: dict[str, Any] | None = None
     dns: DnsFailures = field(default_factory=DnsFailures)
+    refusals: Refusals = field(default_factory=Refusals)
     run_id: str = field(init=False)
     began_wall: float = field(init=False)
     began: float = field(init=False)
@@ -414,6 +416,7 @@ def _record(state: _RunState, result: Outcome, completed_at: float, observed: fl
     bucket = bucket_of(state.began_wall + elapsed)
     state.totals.add(result)
     state.dns.add(result.detail)
+    state.refusals.add(result)
     if state.slices is not None:
         state.slices.add(elapsed, result)
     kind = state.answers.add(result, completed_at)
@@ -664,6 +667,9 @@ async def _finish(state: _RunState, summary: RunSummary) -> None:
         state.flush(final=True)
         for future in state.pending:
             await asyncio.shield(asyncio.wrap_future(future))
+        keep = getattr(state.sink, "refusals", None)  # a sink without the hook keeps no samples
+        if keep is not None and state.refusals.samples:
+            await asyncio.to_thread(keep, state.refusals.rows(state.run_id, state.config))
         await asyncio.to_thread(state.sink.finish, summary)
     finally:
         # No writer may outlive the stream it owns, including on disk failure.

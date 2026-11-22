@@ -21,7 +21,7 @@ from aiohttp_socks import (
     ProxyType,
 )
 
-from . import bytes_io, node_dns
+from . import bytes_io, node_dns, refusals
 from .bytes_io import ByteCount, Exchange
 from .models import Outcome, ProxyConfig, RequestContext, RunConfig, protocol_of
 from .outcome import BODY_CODES, Verdict, failed_response, sniff_body
@@ -94,6 +94,8 @@ class HttpTransport:
         self._request_index = 0
         # Only a 'mixed' network follows a gateway's HTTP-to-HTTPS redirect (models).
         self._mixed = protocol_of(config.proxy) == "mixed"
+        # This process's share of the run's refused-answer samples (refusals.py).
+        self._refusals = refusals.Quota()
 
     async def __aenter__(self) -> HttpTransport:
         # HTTP auth is per request. A dynamic SOCKS source needs an isolated
@@ -182,7 +184,7 @@ class HttpTransport:
         """One request; returns its outcome and any redirect Location header."""
         kwargs = _proxy_kwargs(spec, proxy)
         raw = bytearray()
-        status = location = error = exit_ip = detail = None
+        status = location = error = exit_ip = detail = answer = None
         verdict: str | None = None
         counted: ByteCount | None = None
         tls = spec.url.startswith("https:")
@@ -195,14 +197,10 @@ class HttpTransport:
             async with (
                 asyncio.timeout(budget),
                 session.request(
-                    spec.method,
-                    spec.url,
-                    data=spec.body,
-                    allow_redirects=False,
-                    **kwargs,
+                    spec.method, spec.url, data=spec.body, allow_redirects=False, **kwargs
                 ) as response,
             ):
-                status = response.status
+                status, answer = response.status, (_leg(spec, proxy), response.raw_headers)
                 location = response.headers.get("Location")
                 sock = slot[-1] if slot else None
 
@@ -230,6 +228,7 @@ class HttpTransport:
             if classified is None:
                 raise
             error, verdict, status = classified[0], classified[1], classified[2] or status
+            answer = ("connect", getattr(exc, "headers", None)) if classified[2] else answer
             detail = node_dns.detail(exc) if error == "dns" else None  # the cause (node_dns)
         finally:
             latency_ms = (time.perf_counter() - started) * 1000
@@ -251,7 +250,36 @@ class HttpTransport:
             bytes_down=counted.down,
             bytes_exact=counted.exact,
             detail=detail,
+            refusal=self._refusal(answer, status, raw, proxy),
         ), location
+
+    def _refusal(
+        self,
+        answer: tuple[str, Any] | None,
+        status: int | None,
+        body: bytearray,
+        proxy: ProxyConfig,
+    ) -> dict[str, Any] | None:
+        """A sample of a non-200 answer while this process has sampled fewer of its kind than the
+        quota (refusals.py); None for every other outcome."""
+        if answer is None or status in (None, 200) or not self._refusals.take((answer[0], status)):
+            return None
+        return refusals.capture(answer[0], status, answer[1], body, _secrets(proxy))
+
+
+def _leg(spec: RequestSpec, proxy: ProxyConfig) -> str:
+    """How a received answer arrived (refusals.LEGS): to a plain-HTTP request sent to an HTTP
+    gateway, else through a tunnel."""
+    return "plain" if proxy.scheme == "http" and spec.url.startswith("http:") else "tunnel"
+
+
+def _secrets(proxy: ProxyConfig) -> tuple[str, ...]:
+    """The request's login strings a sample must not keep: the Basic header, its token, the user
+    name and the password."""
+    if proxy.username is None:
+        return ()
+    auth = aiohttp.encode_basic_auth(proxy.username, proxy.password)
+    return (auth, auth.split()[-1], proxy.username, proxy.password or "")
 
 
 def _failed_count(slot: list[Any], connect: bool, answered: bool) -> ByteCount:

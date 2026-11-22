@@ -316,6 +316,8 @@ class Outcome:
     redirected: bool = False
     # The exact text of a 'dns' error (node_dns.detail); None for every other outcome.
     detail: str | None = None
+    # A redacted sample of a non-200 answer (refusals.capture), while the quota lasts; else None.
+    refusal: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         verdict = from_error(self.error) if self.verdict is None else self.verdict
