@@ -113,7 +113,7 @@ def test_the_calculation_command():
         "-p",
         "MemoryMax=8G",
         "-p",
-        "RuntimeMaxSec=7260",  # the timeout + 60 s: the hard limit, also when the orchestrator
+        "RuntimeMaxSec=10860",  # the timeout + 60 s: the hard limit, also when the orchestrator
         # no longer watches it, and after the orchestrator's own kill
         "-p",
         "CollectMode=inactive-or-failed",  # an OOM-killed scope never blocks the next hour

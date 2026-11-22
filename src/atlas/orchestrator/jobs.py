@@ -8,8 +8,9 @@ calculate                 every minute, due by calculate.trigger: "hourly" (defa
                           MIN_HOUR_OFFSET_S, so the hour just released is in), or "batch"
                           debounced to calculate.min_interval_seconds and only after a batch
                           finished; runs `atlas calculate --publish` as a subprocess (a
-                          build may take up to 2 hours: job_stuck pages once a run takes over
-                          CALCULATE_STUCK_S), killed after calculate.timeout_seconds, under
+                          build may take up to 3 hours: job_stuck pages once a run outlives
+                          its kill, CALCULATE_STUCK_S), killed after calculate.timeout_seconds,
+                          under
                           `systemd-run --scope --unit=atlas-calculate -p MemoryMax=…
                           -p RuntimeMaxSec=<timeout + 60>` when $ATLAS_CALCULATE_MEMORY_MAX is
                           set (the manager's unit; auto: sizing.scope_memory); its timing lines
@@ -86,13 +87,16 @@ MIN_HOUR_OFFSET_S = 300 + RELEASE_EVERY_S
 # A raw_upload run takes seconds; one still going after this raises job_stuck (the per-request
 # timeouts of archive.multipart end even a hung upload well before).
 RAW_UPLOAD_STUCK_S = 1800
-# CALC-LIMITS-1/2 (owner decisions 2026-11-19): a calculation may take up to 2 hours. One still
-# going after CALCULATE_STUCK_S raises job_stuck (paged at once); calculate.timeout_seconds (7200)
-# kills it; the scope's RuntimeMaxSec, SCOPE_GRACE_S later so this process's own kill comes
-# first, ends one this process no longer watches (a crashed orchestrator).
-CALCULATE_STUCK_S = 3000
-CALCULATE_TIMEOUT_S = 7200  # the default of calculate.timeout_seconds (db.py)
+# CALC-LIMITS-3 (owner decision 2026-11-22): a calculation may take up to 3 hours, so a long
+# build is no alarm: calculate.timeout_seconds (10800) kills it, which fails the job (job_failed);
+# the scope's RuntimeMaxSec, SCOPE_GRACE_S later so this process's own kill comes first, ends one
+# this process no longer watches (a crashed orchestrator). One still going STUCK_MARGIN_S after
+# the timeout outlived both kills and raises job_stuck (paged at once); at the timeout itself
+# the alarm would race the kill and page a build that is ending anyway.
+CALCULATE_TIMEOUT_S = 10800  # the default of calculate.timeout_seconds (db.py)
 SCOPE_GRACE_S = 60
+STUCK_MARGIN_S = 300
+CALCULATE_STUCK_S = CALCULATE_TIMEOUT_S + STUCK_MARGIN_S
 # The calculation's memory cap (a systemd size such as 8G, or auto), set by the manager's unit.
 MEMORY_ENV = "ATLAS_CALCULATE_MEMORY_MAX"
 MEMORY_RE = re.compile(r"[1-9][0-9]*[KMGT]?")
