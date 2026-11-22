@@ -83,10 +83,10 @@ class Mini:
         plist = (app or self.app) / "Contents" / "Info.plist"
         return plist.read_text() if plist.exists() else None
 
-    def log(self, kind: str, batch: int, minutes_ago: float) -> None:
+    def log(self, kind: str, batch: int, minutes_ago: float, network: str = "a/res") -> None:
         """A browser node log line, as browser/node.py writes it (sorted keys)."""
         at = (datetime.now(UTC) - timedelta(minutes=minutes_ago)).isoformat()
-        line = {"at": at, "batch": batch, "kind": kind, "network": "n", "target": "amazon_pdp"}
+        line = {"at": at, "batch": batch, "kind": kind, "network": network, "target": "amazon_pdp"}
         with open(self.state / "logs" / "browser-node.jsonl", "a") as log:
             log.write(json.dumps(line, sort_keys=True) + "\n")
 
@@ -205,12 +205,28 @@ def test_with_the_node_state_it_waits_until_no_run_is_open(mini):
     mini.log("start", 9, 10)  # open
     result = mini.run("--state", str(mini.state), "--wait", "4")
     assert result.returncode == 3
-    assert "busy for 4 s (open runs: 9; Chrome processes: 0); nothing changed" in result.stdout
-    assert "waiting for a quiet moment (open runs: 9)" in result.stdout
+    busy = "busy for 4 s (open runs: 9:a/res; Chrome processes: 0); nothing changed"
+    assert busy in result.stdout
+    assert "waiting for a quiet moment (open runs: 9:a/res)" in result.stdout
     assert mini.version() == "157.0.8103.79" and mini.leftovers() == []
     mini.log("run", 9, 0)
     result = mini.run("--state", str(mini.state), "--wait", "4")
     assert result.returncode == 0, result.stderr
+    assert mini.version() == "158.0.8127.37"
+
+
+def test_a_batch_shared_by_two_networks_is_open_until_both_runs_end(mini):
+    """One batch is one slot of a target for every network of the host: each network's run
+    writes its own start and run lines with the same batch id."""
+    mini.install("157.0.8103.79")
+    mini.log("start", 12, 20, "a/res")
+    mini.log("start", 12, 20, "b/res")
+    mini.log("run", 12, 2, "a/res")  # b's run still has tries to go
+    result = mini.run("--state", str(mini.state), "--wait", "2")
+    assert result.returncode == 3 and "open runs: 12:b/res;" in result.stdout
+    assert mini.version() == "157.0.8103.79"
+    mini.log("run", 12, 0, "b/res")
+    assert mini.run("--state", str(mini.state), "--wait", "2").returncode == 0
     assert mini.version() == "158.0.8127.37"
 
 
@@ -242,7 +258,7 @@ def test_status_reports_and_changes_nothing(mini):
     result = mini.run("--status", "--state", str(mini.state))
     assert result.returncode == 0, result.stderr
     assert "installed: Chrome 158.0.8127.37; previous: Chrome none" in result.stdout
-    assert "open runs: 3; Chrome processes: 0" in result.stdout
+    assert "open runs: 3:a/res; Chrome processes: 0" in result.stdout
     assert mini.calls("curl") == [] and mini.leftovers() == []
 
 

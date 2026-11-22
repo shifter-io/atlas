@@ -73,7 +73,8 @@ iso_ago() {
   date -u -d "@$t" +%Y-%m-%dT%H:%M:%S 2> /dev/null || date -u -r "$t" +%Y-%m-%dT%H:%M:%S
 }
 
-# The batches of the node's runs started in the last RUN_MINUTES whose "run" line is not written.
+# The node's runs (batch:network; a batch is shared by the host's networks) started in the last
+# RUN_MINUTES whose "run" line is not written.
 open_runs() {
   [ -n "$STATE" ] || return 0
   local log="$STATE/logs/browser-node.jsonl"
@@ -81,6 +82,7 @@ open_runs() {
     | awk -v since="$(iso_ago "$RUN_MINUTES")" '
       /"kind": "(start|run)"/ && match($0, /"batch": [0-9]+/) {
         b = substr($0, RSTART + 9, RLENGTH - 9)
+        if (match($0, /"network": "[^"]*"/)) b = b ":" substr($0, RSTART + 12, RLENGTH - 13)
         if ($0 ~ /"kind": "run"/) { done[b] = 1; next }
         if (match($0, /"at": "[^"]*"/) && substr($0, RSTART + 7, RLENGTH - 8) >= since) started[b] = 1
       }
@@ -111,6 +113,7 @@ swap() {
   if [ -e "$APP" ]; then mv "$APP" "$PREV" || die "the installed app could not be moved aside"; fi
   if ! mv "$STAGE" "$APP"; then
     if [ -e "$PREV" ]; then mv "$PREV" "$APP"; fi
+    if [ "$MODE" = restore ]; then mv "$STAGE" "$PREV" || true; fi # keep the version to restore
     die "the new app could not be put in place; the installed one is back"
   fi
 }
