@@ -57,6 +57,21 @@ browser_min_requests = 100
 # whole runs too. Pulse and daily-test windows are unchanged. Without the setting ("bucket") a
 # window holds the tries whose 5-minute bucket starts in it.
 browser_window_rule = "whole_run"
+# Browser runs left out of every figure, for every network the same way (CHROME-STALE-EXCLUDE-1,
+# the owner's decision of 2026-11-22; calculated/exclusions.py): the runs of `target` on `engine`
+# that started in [started_from, started_before), UTC. Each such run counts in no window (24h, 7d,
+# 30d), day or chart point, and in no target figure, target score, Success x/10, success rate
+# over all targets or bill; the run and its results stay stored. A site may answer a Chrome
+# older than the current Stable major with its bot check on almost every try, whatever the
+# network: such a run measures our browser, not the network. From Chrome 158's Stable release
+# (2026-11-17 19:07 UTC) no browser host ran the current Stable major (they ran 156 and 157) until
+# the hosts were replaced by ones on Chrome 158, the last at 2026-11-20 13:10 UTC; the first
+# amazon_pdp run on an up-to-date host started after it. From the morning of 18 Nov the product
+# page answered almost every try of those runs with its bot check, on every host. The database
+# records neither a run's Chrome version nor its host, so the span is set by run start.
+browser_exclusions = [
+  { target = "amazon_pdp", engine = "chrome", started_from = "2026-11-17T19:07:00Z", started_before = "2026-11-20T13:10:00Z", reason = "chrome_behind_stable" },
+]
 # A network's country counts only while its latest daily test there found at least
 # country_min_ips unique IPs (the owner's decisions of 2026-11-15, #1137, and 2026-11-16, #1253:
 # a country counts as soon as its daily test finds one exit IP; one with none is "no exits").

@@ -808,6 +808,16 @@ by the range's start (BROWSER-WHOLE-RUN-1, #1266; the methodology's
 `browser_window_rule = "whole_run"`). A run finishing after the range's end is not
 in it; one that started before the 30 days of raw rows is in no range.
 
+Some browser runs are **left out** of every figure, for every network the same
+way (CHROME-STALE-EXCLUDE-1; the methodology's `browser_exclusions`): the runs of
+a named target and engine that started in a named span. Today: the `amazon_pdp`
+Chrome runs started from 2026-11-17 19:07 UTC (Chrome 158's Stable release) to
+2026-11-20 13:10 UTC, while no browser host ran the current Stable Chrome and the
+site answered almost every try with its bot check. Such a run is in no range,
+day, series point, target figure or score, `success_overall` (the Success x/10),
+`successRateAllTargets` or bill; its raw results stay stored. The fields and
+their shape do not change.
+
 On a browser target's `targets[<id>]` entry (network answers, providers and
 `productMeasurements`), besides `requests` as for every target:
 

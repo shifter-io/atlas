@@ -24,6 +24,9 @@ loads or none, never cut by a window edge. A run that finishes after the window'
 it. A run that started before the build's raw rows (the 30 days) is in none (horizon()), since
 its first tries are no longer read. Without the rule a window holds the rows whose bucket starts
 in it.
+
+CHROME-STALE-EXCLUDE-1. A run of a target and engine the methodology's [[browser_exclusions]]
+name, started in an entry's span, is in no window either (excluded(), exclusions.py).
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from ..browser.contracts import BROWSER_ENGINE, BROWSER_KIND, BROWSER_TARGETS, S
 from ..browser.engines import CHROME, DEFAULT_ENGINE
 from ..stats import Histogram
 from ..targets import registry
+from .exclusions import spans
 from .policy import browser_whole_runs
 
 # The role label of a browser run (calculator.BATCH_ROLES).
@@ -122,6 +126,24 @@ def horizon(config, runs, buckets, start):
         return buckets
     early = {r["run_key"] for r in runs if r["started_at"] < start and is_browser_run(r)}
     return [b for b in buckets if b["run_key"] not in early] if early else buckets
+
+
+def excluded(config, runs, buckets):
+    """The bucket rows without those of the browser runs the methodology's [[browser_exclusions]]
+    leave out (exclusions.py): of an entry's target and engine, started in its span. Every row
+    without an entry."""
+    found = spans(config)
+    if not found:
+        return buckets
+    out = {r["run_key"] for r in runs if is_browser_run(r) and _in_span(found, r)}
+    return [b for b in buckets if b["run_key"] not in out] if out else buckets
+
+
+def _in_span(found, run):
+    """Whether a run's target and engine have a span of found (exclusions.spans()) that holds its
+    start."""
+    key = (run["scope"]["target"]["id"], run_engine(run["scope"]["config"]))
+    return any(start <= run["started_at"] < end for start, end in found.get(key, ()))
 
 
 def is_browser_run(run):
