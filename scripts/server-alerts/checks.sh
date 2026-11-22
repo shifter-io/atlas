@@ -9,10 +9,10 @@
 PROC=${ATLAS_ALERTS_PROC:-/proc}
 MEM_MIN=10            # percent of the memory still available
 LOAD_MAX=2            # the 15-minute load per CPU
-CALC_MAX=15000        # age of the published calculation while the manager is on (250 min): a
-                      # build is aged from its start and may take 2 h (killed at 7200 s); the
-                      # next starts within a minute and may take 2 h too: 7200+60+7200 = 241 min,
-                      # plus 9 min to start and publish (CALC-LIMITS-2)
+CALC_MAX=22200        # age of the published calculation while the manager is on (370 min): a
+                      # build is aged from its start and may take 3 h (killed at 10800 s); the
+                      # next starts within a minute and may take 3 h too: 10800+60+10800 s =
+                      # 361 min, plus 9 min to start and publish (CALC-LIMITS-3)
 INGEST_MAX=5400       # age of the newest stored test run while the hourly test is on (90 min)
 TIMER_MAX=3780        # an hourly timer's last firing (1 hour 3 minutes)
 NODE_MAX=1800         # a browser mini's last heartbeat (30 minutes)

@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 from datetime import UTC, datetime, time, timedelta
+from time import perf_counter
 
 import psycopg
 import pytest
@@ -275,16 +276,39 @@ def test_job_table_registers_every_job_with_its_schedule():
     }
     assert list(db.on_close) == ["reports"]
     stuck = {name: t.stuck_after_s for name, t in scheduler.tasks.items() if t.stuck_after_s}
-    assert stuck == {"raw_upload": jobs.RAW_UPLOAD_STUCK_S, "calculate": 3000}
+    assert stuck == {"raw_upload": jobs.RAW_UPLOAD_STUCK_S, "calculate": 11100}
 
 
-def test_a_calculation_pages_before_its_timeout_and_its_scope_limit():
-    """CALC-LIMITS-2: a build may take up to 2 hours; job_stuck comes first, then the kill."""
+def test_a_calculation_is_killed_before_it_pages():
+    """CALC-LIMITS-3: a build may take up to 3 hours; the kill, then the scope's limit, and only
+    a build that outlived both pages (job_stuck)."""
     from atlas.orchestrator.db import DEFAULTS
 
     timeout = DEFAULTS["calculate.timeout_seconds"]
-    assert (jobs.CALCULATE_STUCK_S, timeout, jobs.CALCULATE_TIMEOUT_S) == (3000, 7200, 7200)
-    assert "RuntimeMaxSec=7260" in jobs.calculation_argv("db.toml", "m.toml", "8G")
+    assert (timeout, jobs.CALCULATE_TIMEOUT_S, jobs.CALCULATE_STUCK_S) == (10800, 10800, 11100)
+    assert "RuntimeMaxSec=10860" in jobs.calculation_argv("db.toml", "m.toml", "8G")
+
+
+async def test_a_three_hour_calculation_is_not_stuck(database, db):
+    """CALC-LIMITS-3: a calculation still running at its 3-hour kill raises no job_stuck; one
+    still running after the kill and the scope's limit does, once per run."""
+    scheduler = Scheduler(db)
+
+    async def job():
+        return {}
+
+    task = scheduler.add("calculate", job, every_s=60)
+    task.stuck_after_s = jobs.CALCULATE_STUCK_S
+    task.running, task.run_id = True, 7
+    task.began = perf_counter() - 10800
+    await scheduler.run_now("calculate")
+    assert query(database, "SELECT kind FROM alerts") == []
+    task.began -= jobs.CALCULATE_STUCK_S - 10800
+    await scheduler.run_now("calculate")
+    await scheduler.run_now("calculate")
+    assert query(database, "SELECT kind,message,dedupe_key,occurrences FROM alerts") == [
+        ("job_stuck", "calculate still running after 185 min", "job_stuck:calculate:7", 2)
+    ]
 
 
 @pytest.mark.parametrize("first", ["job_table", "jobs", "pulse_slots", "pulse"])

@@ -19,8 +19,9 @@ set | digest_hour_utc | 4
 manager:proxy_login_refused* | now | 0 | 6 | Renew the network's account login (on "payment required", HTTP 402: top up or renew the account), then run atlas daily resume-network <net>.
 manager:network_paused* | now | 0 | 6 | Renew the network's account login (on "payment required", HTTP 402: top up or renew the account), then run atlas daily resume-network <net>.
 manager:operator_test* | now | 0 | 6 | Nothing: an operator tested the alert path.
-# A calculation still running after 50 min (CALC-LIMITS-1/2): at once, before it is killed at 120 min.
-manager:job_stuck:calculate* | now | 0 | 6 | Read the calculate job's timing lines in the manager journal; it is killed at calculate.timeout_seconds (120 min by default).
+# A calculation still running after 185 min (CALC-LIMITS-3), past its kill at calculate.timeout_seconds
+# (180 min by default) and its scope's limit: at once.
+manager:job_stuck:calculate* | now | 0 | 6 | Read the calculate job's timing lines in the manager journal; it outlived its kill at calculate.timeout_seconds: stop its calculate scope (docs/campaign.html, the orchestrator).
 # Expected or budgeted: a gap in data, not an outage.
 manager:pulse_runs_open* | digest | 0 | 6 |
 manager:pulse_cells_lost* | digest | 0 | 6 |
@@ -37,7 +38,7 @@ network-down:* | page | 30 | 6 | Check the provider's status page and our accoun
 restarted:* | digest | 0 | 6 |
 could-not-restart:* | page | 15 | 6 | Its automatic restarts did not bring it back: read journalctl --user -u <object>, fix, restart it.
 # Data at risk: the ingest stopped (90 min + 30), the calculation is not published for about
-# 4 h 40 min (250 min + 30; two builds of up to 2 hours each back to back, CALC-LIMITS-2).
+# 6 h 40 min (370 min + 30; two builds of up to 3 hours each back to back, CALC-LIMITS-3).
 check-failed:ingest | page | 30 | 6 | Check the hourly test timer and the manager journal.
 check-failed:calculation | page | 30 | 6 | Check the calculate job in the manager journal.
 check-failed:manager job raw_upload | page | 180 | 6 | Read the raw_upload job's error in the manager journal.
