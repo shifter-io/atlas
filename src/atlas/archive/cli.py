@@ -1,4 +1,4 @@
-"""`atlas archive export|restore|run|bucket|rebuild|raw` (operator).
+"""`atlas archive export|restore|run|bucket|rebuild|raw|refusals` (operator).
 
 `export` writes one day's file (`<out>/YYYY-MM-DD.tar.gz`) and deletes nothing. `restore`
 loads a day file (`--file`, or `--date` from the bucket) into a database with the same storage
@@ -8,6 +8,8 @@ schema. `run` archives the due days now (what the orchestrator's daily `archive`
 `--mmdb`, daily runs enriched first) and, with `--spaces-file`, the browser bundles archived in
 Spaces for those days. `raw` lists an hour's raw-file objects in the bucket and, with
 `--network` and `--out`, extracts that network-hour into a spool layout (rawhours.fetch).
+`refusals` prints, one JSON object per line, the refused-answer samples (atlas/refusals.py) of
+the runs spooled on some days, read-only; `--network` and `--status` narrow them.
 Refusals exit 2 and change nothing.
 """
 
@@ -53,6 +55,12 @@ def register(commands) -> None:
     raw.add_argument("--hour", type=_hour, required=True, help="YYYY-MM-DDTHH (UTC)")
     raw.add_argument("--network", help="Extract this network's files (with --out)")
     raw.add_argument("--out", type=Path, help="Root to extract into (a spool layout)")
+    refused = actions.add_parser("refusals", help="Print the spooled refused-answer samples")
+    refused.add_argument("--spool", type=Path, required=True, help="raw.spool_dir, or raw --out")
+    refused.add_argument("--from", dest="first", type=date.fromisoformat, required=True)
+    refused.add_argument("--to", dest="last", type=date.fromisoformat, required=True)
+    refused.add_argument("--network", help="Only this network's runs")
+    refused.add_argument("--status", type=int, help="Only answers with this HTTP status")
     bucket = actions.add_parser("bucket", help="Check the bucket is private and versioned")
     bucket.add_argument("--spaces-file", type=Path, required=True)
     bucket.add_argument("--apply", action="store_true", help="Enable versioning")
@@ -145,9 +153,19 @@ HANDLERS = {
 }
 
 
+def _refusals(args) -> int:
+    from ..refusals import spooled
+
+    for row in spooled(args.spool, args.first, args.last, args.network, args.status):
+        print(json.dumps(row, separators=(",", ":")))
+    return 0
+
+
 def dispatch(args) -> int:
     if args.archive_action == "export":
         return _export(args)
+    if args.archive_action == "refusals":
+        return _refusals(args)
     try:
         report = HANDLERS[args.archive_action](args)
     except ArchiveError as exc:

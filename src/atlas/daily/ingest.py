@@ -59,7 +59,7 @@ from pathlib import Path
 
 import psycopg
 
-from .. import proxy_login, sizing, storage_parallel, timing
+from .. import proxy_login, refusals, sizing, storage_parallel, timing
 from ..campaign.contracts import budget_stop_path
 from ..campaign.tick import load_spec
 from ..enrichment import enrich_run
@@ -113,7 +113,8 @@ def convert_country(folder: Path, runs: Path, *, stopped: str | None = None) -> 
     """An ingestible run directory from one round country folder; returns its path. A country
     a stop ended is stored as measured: completed, with its stop_reason (`stopped`: `budget` or
     `cell_stop`)."""
-    measured = read_json(folder / "summary.json")["measurement"]
+    found = read_json(folder / "summary.json")
+    measured = found["measurement"]
     if not measured:
         raise ValueError("the country has no measurement")
     if stopped:
@@ -129,6 +130,7 @@ def convert_country(folder: Path, runs: Path, *, stopped: str | None = None) -> 
             out.write((json.dumps(row, separators=(",", ":")) + "\n").encode())
     ips.chmod(0o600)
     artifacts = {"ips": {"file": ips.name, "rows": len(rows), "sha256": digest(ips)}}
+    refusals.write(directory, found.get("refusals") or [])  # raw only, never imported
     atomic_json(directory / "summary.json", measured | {"artifacts": artifacts, MARKER: DAILY})
     return directory
 

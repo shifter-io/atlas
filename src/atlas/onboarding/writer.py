@@ -193,6 +193,11 @@ class SummarySink:
 
     def start(self, run_id):
         self.run_id = run_id
+        self.refused = []
+
+    def refusals(self, rows):
+        """The run's refused-answer samples, which the scheduler keeps in its summary.json."""
+        self.refused = rows
 
     def observations(self, rows):
         pass

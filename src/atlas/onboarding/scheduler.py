@@ -250,6 +250,7 @@ async def run_job(context: JobContext, job: dict) -> None:
             "peak_queue": writer.peak_queue,
             "peak_memory_mb": peak_memory_mb(),
             "measurement": measurements.to_dict() if measurements else None,
+            **({"refusals": sink.refused} if getattr(sink, "refused", None) else {}),
         },
     )
     context.state["active"] = None
