@@ -56,7 +56,7 @@ from ..node_tls import check_private as _check_private
 from ..node_tls import client_tls
 from ..sinks import JsonSink
 from ..targets import TargetRegistry, registry
-from . import asset_cache, chrome, engines, procstats, rawfiles, release
+from . import asset_cache, chrome, chrome_current, engines, procstats, rawfiles, release
 from .contracts import BROWSER_KIND, BROWSER_REGION, user_agent
 from .contracts import CAMOUFOX_FIELDS as CAMOUFOX
 from .driver import host_os
@@ -295,6 +295,8 @@ class BrowserHost:
         }
         # A Chrome run's engine block: the last launched Chrome's, else the detected one's.
         self.chrome = detected_chrome(settings) if engines.CHROME in used else None
+        # Whether that Chrome is the current Stable major (chrome_current.py, CHROME-CURRENT-1).
+        self.current = chrome_current.Watch(settings.chrome.executable, host_os())
         self.hour_interval = HOUR_S
         self.outbox_interval = OUTBOX_EVERY_S
         self.busy_ms = 0
@@ -412,12 +414,14 @@ class BrowserHost:
                 await asyncio.wait_for(self._wake.wait(), self.outbox_interval)
 
     def config_options(self, network: Network, assignment: dict[str, Any]) -> dict[str, Any]:
-        """The RunConfig fields from the settings; refuses other kinds and unlisted targets."""
+        """The RunConfig fields from the settings; refuses other kinds, unlisted targets and a
+        CURRENT_CHROME target's run while the host's Chrome is outdated (chrome_current)."""
         if assignment.get("kind") != BROWSER_KIND:
             raise UnexpectedKind
         entry = self.targets.get(assignment.get("target_id"))
         if entry is None:
             raise UnknownTarget
+        self.current.check(self.registry.get(entry.id), self.settings.engine(entry.id))
         page_timeout_s = entry.timeout_s or self.settings.browser.page_timeout_s
         options: dict[str, Any] = {
             "requests": entry.tries,
@@ -498,7 +502,7 @@ class BrowserHost:
         line["utilization"] = round(seconds / (self.pool.size * self.hour_interval), 4)
         line |= self.outbox.hour_stats()
         line |= {"discarded": self.discarded, "discard_failed": self.discard_failed}
-        line["unsealed"] = self.unsealed
+        line |= {"unsealed": self.unsealed, "chrome_current": self.current.state()}
         gates = {n.provider: self.gates[n.name] for n in self.networks if n.name in self.gates}
         line["gates"] = {provider: gate.stats() for provider, gate in gates.items()}
         self.log.write(line)
@@ -526,7 +530,8 @@ class BrowserHost:
         )
         self.discarded, self.unsealed, self.discard_failed = recovered
         tasks = [asyncio.create_task(agent.run(stop)) for agent in self.agents]
-        helpers = [asyncio.create_task(loop(stop)) for loop in (self._hourly, self._outbox_loop)]
+        loops = [self._hourly, self._outbox_loop] + [self.current.loop] * (self.chrome is not None)
+        helpers = [asyncio.create_task(loop(stop)) for loop in loops]
         try:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
         finally:

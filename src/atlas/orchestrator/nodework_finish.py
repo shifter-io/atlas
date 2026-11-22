@@ -9,6 +9,7 @@ from typing import Any
 
 import psycopg
 
+from ..browser.contracts import CHROME_OUTDATED
 from .batches import (
     _moment,
     census_down,
@@ -17,6 +18,7 @@ from .batches import (
     close_batch,
     run_finished,
 )
+from .browser_hosts import chrome_outdated
 from .db import Database
 from .sqlrows import _now, _row
 
@@ -120,4 +122,6 @@ async def fail_run(
             return existing["status"] if existing else None
         await run_finished(conn, batch_id, run["product_id"], now)
         await close_batch(conn, batch_id, now)
+        if error.startswith(CHROME_OUTDATED):
+            await chrome_outdated(conn, node, batch_id, error[:500], now)
         return "failed"
