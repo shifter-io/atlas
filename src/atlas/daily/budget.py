@@ -32,7 +32,8 @@ budget of 100 planned, so its budget is 40, the measured limit of the account wi
 BROWSER_RESERVE is 8: 32 are left, a daily hour of n regions runs 32 // n per droplet (its
 busiest hours have 6 regions: 5 each) and its 8 pulse droplets get 4 each, 2 per run (with 10
 kept, 3 each: one connection per run, and a far region's run of about 5 minutes would outlast
-pulse_late.PACED_ROOM). 4 is under MIN_RUN, so a pulse droplet's floor is RUNS_AT_ONCE instead.
+pulse_late.PACED_ROOM). 4 is under MIN_RUN, so a pulse droplet's floor is RUNS_AT_ONCE instead,
+and a run under MIN_RUN gets pulse_late.NARROW_ROOM before the HH:52 run limit (PULSE-ROOM-1).
 
 PULSE-STEP-1: a budgeted network's pulses are the same 100 requests as every network's (owner
 rule of 2026-11-16, a fair ranking), every country every hour, paced to its share: its late slot

@@ -1,8 +1,8 @@
 """PULSE-STEP-1/2: a budgeted network's late pulse slot gives each droplet its next run when one of
 its RUNS_AT_ONCE slots is free (never sooner than the step over the targets, none after HH:48,
-PULSE-STEP-3), so no run waits past the start grace whatever its droplet's run time and none is
-still running at the HH:52 run limit. The simulation runs each droplet as node.py does; the
-database tests use the test's own PostgreSQL."""
+PULSE-STEP-3, or HH:46 at 2 connections a run, PULSE-ROOM-1), so no run waits past the start
+grace whatever its droplet's run time and none is still running at the HH:52 run limit. The
+simulation runs each droplet as node.py does; the database tests use the test's own PostgreSQL."""
 
 from __future__ import annotations
 
@@ -30,6 +30,8 @@ GATE = timedelta(minutes=20)  # the daily runs of the hour done (they end about 
 GRACE = timedelta(seconds=180)  # batch.start_grace_seconds: the reaper fails a run not started
 GAP = timedelta(seconds=15)  # proxy-cheap's 30 s step over its two hourly targets
 LAST = HOUR + pulse_late.last_start(budget.pulse_step(["proxy-cheap"]))  # HH:48 (PULSE-STEP-3)
+# PULSE-ROOM-1: a run of 2 connections (PC-BUDGET-1) starts by HH:46
+NARROW_LAST = HOUR + pulse_late.last_start(GAP * 2, pulse_late.NARROW_ROOM)
 NODE_POLL = 5  # node.py's work poll, seconds
 # 100 requests at 5 connections per region, 16 Nov 2026 07:00 (median, median, p90 in turn).
 SECONDS = {
@@ -70,28 +72,34 @@ class _Run:
 
 
 def _simulate(
-    counts: dict[str, int], seconds: dict, *, clock: bool = False, gate: timedelta = GATE
+    counts: dict[str, int],
+    seconds: dict,
+    *,
+    clock: bool = False,
+    gate: timedelta = GATE,
+    last: datetime = LAST,
 ) -> list[_Run]:
     """Each droplet's runs (`counts`), at its region's run times (`seconds`, in turn), from the
-    gate on."""
+    gate on, none given after `last`."""
     found = []
     for node, count in counts.items():
-        found += _droplet(node, count, seconds[node], clock, HOUR + gate)
+        found += _droplet(node, count, seconds[node], clock, (HOUR + gate, last))
     return found
 
 
-def _droplet(node: str, count: int, seconds: tuple, clock: bool, begin: datetime) -> list[_Run]:
+def _droplet(node: str, count: int, seconds: tuple, clock: bool, times: tuple) -> list[_Run]:
     """One droplet as node.py runs it: it sees a run at its next work poll (a clock's runs are
     claimed minutes ahead), starts it at its start_at once it holds fewer than RUNS_AT_ONCE (its
     connection pool, oldest first) and ends it after its run time. The runs are given by the
-    Puller every PULL_SECONDS (none after LAST), or (`clock`) every GAP from the gate's 15 s
-    (PULSE-STEP-1)."""
+    Puller every PULL_SECONDS (none after `times`' last), or (`clock`) every GAP from the gate's
+    15 s (PULSE-STEP-1). `times`: (the gate, the last start)."""
+    begin, last = times
     runs = []
     if clock:
         first = begin + timedelta(seconds=15)
         runs = [_Run(node, first + GAP * i, seconds[i % 3]) for i in range(count)]
     queue = {} if clock else {node: list(range(count))}
-    puller = pulse_late.Puller(queue, GAP, LAST)
+    puller = pulse_late.Puller(queue, GAP, last)
     for tick in range(40 * 60):
         now = begin + timedelta(seconds=tick)
         if tick % int(pulse_late.PULL_SECONDS) == 0:
@@ -176,12 +184,13 @@ def test_a_slow_droplet_near_the_end_gets_no_run_it_cannot_finish_by_the_run_lim
 @pytest.mark.parametrize("gate", [18, 32])
 def test_at_two_connections_per_run_every_droplet_ends_by_hh52(gate):
     """PC-BUDGET-1: a pulse droplet of 4 connections runs each pulse on 2, about 2.5 times as
-    long as on 5 (syd1's p90 79 s: about 198 s), inside PACED_ROOM: no run is late or still
-    running at HH:52; fewer start."""
+    long as on 5 (syd1's p90 79 s: about 198 s), inside NARROW_ROOM (PULSE-ROOM-1): no run is
+    late or still running at HH:52; fewer start."""
     slow = {region: tuple(round(2.5 * s) for s in times) for region, times in SECONDS.items()}
-    assert pulse_late.PACED_ROOM >= timedelta(seconds=NODE_POLL + max(slow["syd1"]))
-    runs = _simulate(_counts(), slow, gate=timedelta(minutes=gate))
-    assert _late(runs) == [] and max(r.start_at for r in runs) <= LAST
+    assert pulse_late.room({"proxy-cheap": 4}) == pulse_late.NARROW_ROOM
+    assert pulse_late.NARROW_ROOM >= timedelta(seconds=NODE_POLL + max(slow["syd1"]))
+    runs = _simulate(_counts(), slow, gate=timedelta(minutes=gate), last=NARROW_LAST)
+    assert _late(runs) == [] and max(r.start_at for r in runs) <= NARROW_LAST
     assert max(_end(r) for r in runs) <= HOUR + pulse_late.FINISH_BY
     assert len(runs) < sum(_counts().values())
 
@@ -314,10 +323,12 @@ async def test_the_late_phase_pulls_each_droplets_runs_and_removes_it_when_done(
 
     nodes = {f"n-{cell.region}": cell for cell in cells}
     s = SimpleNamespace(db=db, clock=_Clock(database, HOUR + GATE))
-    found = await pulse_late.open_and_wait(None, HOUR, (nodes, cells), s, {"proxy-cheap"})
+    found = await pulse_late.open_and_wait(None, HOUR, (nodes, cells), s, {"proxy-cheap": 4})
     opened = found["opened"]
     assert (opened["created"], opened["runs"], opened["not_opened"]) == (8, 8, 0)
     assert opened["step_seconds"] == 40 and opened["slot"] == (HOUR + GATE).isoformat()
+    assert pullers[0].last == HOUR + timedelta(minutes=46)  # 2 connections a run: PULSE-ROOM-1
+    assert opened["last_start"] == pullers[0].last.isoformat()
     assert found["still_open"] == 0 and sorted(found["removed"]) == ["n-ams3", "n-fra1"]
     assert removed[0] == ("n-ams3", 1)  # ams3 went while fra1 still had runs to be given
     starts = _starts(database)
@@ -346,7 +357,7 @@ async def test_an_error_while_pulling_ends_the_wait_and_reaches_the_job_as_it_is
     monkeypatch.setattr(pulse_late, "open_run", broken)
     s = SimpleNamespace(db=db, clock=_Clock(database, HOUR + GATE))
     with pytest.raises(RuntimeError, match="went away"):
-        await pulse_late.open_and_wait(None, HOUR, ({}, cells), s, {"proxy-cheap"})
+        await pulse_late.open_and_wait(None, HOUR, ({}, cells), s, {"proxy-cheap": 4})
     assert waits == ["started"]
 
 
