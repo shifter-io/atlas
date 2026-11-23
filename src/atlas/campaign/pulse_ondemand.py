@@ -182,7 +182,9 @@ async def _late(hour_root: Path, hour: datetime, held: tuple, s, where) -> dict:
     armed = await pulse_late.arm_late(hour_root, held, s)
     cells, left = armed.pop("cells"), NOTHING | {"opened": {"created": 0}}
     if cells:
-        left = await pulse_late.open_and_wait(hour_root, hour, (armed["armed"], cells), s, networks)
+        left = await pulse_late.open_and_wait(
+            hour_root, hour, (armed["armed"], cells), s, held[0].max_connections
+        )
     return gate | armed | left
 
 

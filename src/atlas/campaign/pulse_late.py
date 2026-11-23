@@ -10,9 +10,9 @@ the network's droplets created and armed (`arm_late`: the same create, arming, o
 and hand-off as the others'), so none sits idle from HH:57 waiting for the gate. Then it opens
 the network's pulses in their own slot (the minute it opened, never HH:00, so the batches are
 the network's own), starting at most last_start past the hour (LAST_START, HH:50; HH:48 for a
-paced network), and waits for them until STOP less REMOVE_LEAD (FINISH_BY, HH:52) past it;
-every droplet is removed by about HH:55, before the next hour's job creates the same names at
-HH:57.
+paced network, HH:46 at 2 connections a run), and waits for them until STOP less REMOVE_LEAD
+(FINISH_BY, HH:52) past it; every droplet is removed by about HH:55, before the next hour's job
+creates the same names at HH:57.
 
 PULSE-STEP-1/2: a network with a daily.budget.PULSE_STEP_SECONDS (proxy-cheap: 30 s) is not
 opened on a clock. A run holds its droplet's share over node_pool.RUNS_AT_ONCE, and its time
@@ -42,6 +42,16 @@ takes about 2.5 times as long as at 5: syd1's p90 about 200 s, inside PACED_ROOM
 deadline grows the same way (780 s), so a run whose requests mostly time out is more often still
 running at HH:52 and lost (`pulse_runs_open`). A large region's droplet starts only some of its
 countries and stays busy until about HH:50: up to about 37 minutes from a gate at HH:15.
+
+PULSE-ROOM-1 (#1412): at 2 connections a run, 4 minutes were not enough. From 19 Nov 12:00 to
+23 Nov 17:00 proxy-cheap finished 18,769 pulse runs (p99 by region 189 to 356 s, tor1's 455 s
+on only 209 runs; the longest 483 s) and lost 36 to `node_removed`, every one started from
+HH:45:59 to HH:48:03 and still running at HH:52 after 240 to 364 s (nyc3, sgp1, fra1, lon1,
+syd1, blr1, ams3). So a run of fewer than budget.MIN_RUN connections (`room`) gets NARROW_ROOM,
+6 minutes, and starts by HH:46: 83 of the 18,769 ran longer (381 over 4 minutes); 35 of the 36
+would have waited for the next hour instead of being lost. The cost: the starts of HH:46 to
+HH:48 (about 12 runs an hour, the last countries of the slow regions in code order) wait for the
+next hour too (`not_opened`). Runs of 5 connections or more keep PACED_ROOM.
 
 The daily runs of the hour are the one-slot campaigns `<campaigns>/<YYYYMMDDtHH>0000z-*` the
 daily runner writes beside the template (`campaigns` is the template link's folder; the job's
@@ -99,6 +109,7 @@ LAST_START = timedelta(minutes=50)
 STOP = timedelta(minutes=55)
 FINISH_BY = timedelta(minutes=52)  # STOP less pulse_ondemand.REMOVE_LEAD: the late wait's end
 PACED_ROOM = timedelta(minutes=4)  # a paced run's time before FINISH_BY (PULSE-STEP-3)
+NARROW_ROOM = timedelta(minutes=6)  # the same for a run under MIN_RUN connections (PULSE-ROOM-1)
 POLL_SECONDS = 15.0
 PULL_SECONDS = 1.0  # how often the paced slot looks for a droplet's free slot (PULSE-STEP-2)
 WAITING = ("pending", "running")
@@ -176,10 +187,18 @@ def slot(hour: datetime, now: datetime) -> datetime:
     return hour + timedelta(minutes=minutes)
 
 
-def last_start(step: timedelta | None) -> timedelta:
-    """The latest start past the hour: LAST_START without a step, else PACED_ROOM (or the step,
-    if longer) before FINISH_BY, so a paced run ends before the late wait does (PULSE-STEP-3)."""
-    return min(LAST_START, FINISH_BY - max(step, PACED_ROOM)) if step else LAST_START
+def last_start(step: timedelta | None, room: timedelta = PACED_ROOM) -> timedelta:
+    """The latest start past the hour: LAST_START without a step, else `room` (or the step, if
+    longer) before FINISH_BY, so a paced run ends before the late wait does (PULSE-STEP-3)."""
+    return min(LAST_START, FINISH_BY - max(step, room)) if step else LAST_START
+
+
+def room(connections: dict[str, int]) -> timedelta:
+    """NARROW_ROOM when a run on the networks' pulse droplets (`connections`: each droplet's,
+    a run holding its share over RUNS_AT_ONCE, node_pool) has fewer than budget.MIN_RUN
+    connections, else PACED_ROOM (PULSE-ROOM-1)."""
+    runs = [max(1, each // RUNS_AT_ONCE) for each in connections.values()]
+    return NARROW_ROOM if runs and min(runs) < budget.MIN_RUN else PACED_ROOM
 
 
 async def open_late(db, clock, hour: datetime, cells: list[Armed]) -> dict:
@@ -238,13 +257,14 @@ async def pull(db, clock, found: datetime, puller: Puller) -> dict:
     return {"created": created, "runs": runs, "not_opened": puller.not_opened}
 
 
-async def open_and_wait(hour_root: Path, hour: datetime, cells: tuple, s, networks) -> dict:
+async def open_and_wait(hour_root: Path, hour: datetime, cells: tuple, s, connections) -> dict:
     """Open the held cells' pulses (`cells`: the held nodes by name and the cells to open) and
     wait for them until FINISH_BY, removing each node once its runs are stored: at once for a
-    network without a step, else run by run as each droplet has a free slot (Puller)."""
+    network without a step, else run by run as each droplet has a free slot (Puller), none
+    after last_start with the room of the networks' `connections` per droplet."""
     nodes, held = cells
     limits = Deadlines((hour + FINISH_BY).timestamp(), (hour + FINISH_BY).timestamp())
-    step = budget.pulse_step(networks)
+    step = budget.pulse_step(connections)
     if step is None:
         opened = await reconnecting(s.clock, open_late, s.db, s.clock, hour, held)
         left = NOTHING
@@ -254,7 +274,8 @@ async def open_and_wait(hour_root: Path, hour: datetime, cells: tuple, s, networ
     runs, least, targets = await reconnecting(s.clock, queues, s.db, held)
     step = max(step, least)
     found = slot(hour, datetime.fromtimestamp(s.clock.now(), UTC))
-    puller = Puller(runs, step / max(1, targets), hour + last_start(step))
+    last = hour + last_start(step, room(connections))
+    puller = Puller(runs, step / max(1, targets), last)
     waiting = asyncio.create_task(
         wait_and_remove(hour_root, hour, nodes, s, limits, pulling=puller.pulling)
     )
@@ -265,6 +286,7 @@ async def open_and_wait(hour_root: Path, hour: datetime, cells: tuple, s, networ
         await asyncio.gather(waiting, return_exceptions=True)
         raise
     paced = {"slot": found.isoformat(), "step_seconds": step.total_seconds()}
+    paced["last_start"] = last.isoformat()
     return {"opened": opened | paced} | await waiting
 
 
