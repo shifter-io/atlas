@@ -800,7 +800,9 @@ out of every figure.
 - A country answered only so has no exit IP, so it is `no_exits` and does not count.
 
 Any other 404 on these targets stays a failure under its own error category `target_404`. That
-is a 404 inside the tunnel, or one with a body (an exit device's own page, an ISP's block page).
+is a 404 inside the tunnel, or one with a body (an exit device's own page, an ISP's block page,
+a page on the path). With the methodology's `scope = "every"` instead of the default
+`"gateway"`, those are left out too: the owner's choice between the two is that one value.
 A 404 on a browser target stays a failure. Stored rows are read by the same rule, so one
 recount applies it to every range. The fields and their shape do not change.
 

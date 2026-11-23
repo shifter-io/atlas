@@ -14,14 +14,14 @@ from pulse_cases import evaluated, products, run, tape, window
 from test_pulse_country_verdicts import verdict
 from test_pulse_no_exit import JUDGED, OUTAGES, REGIONS, judged, stored
 
-from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions
+from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, no_exit_answers
 from atlas import run as measure
 from atlas.browser.targets.pages import AmazonPdp
-from atlas.calculated import incremental, policy
+from atlas.calculated import incremental, policy, rollups, store
 from atlas.daily import tape as daily_tape
 from atlas.daily.expected import statuses
 from atlas.models import Outcome
-from atlas.no_exit_answers import count, exclude, live, slots, strip, targets
+from atlas.no_exit_answers import ECHO, SCOPES, count, exclude, live, rule, slots, strip, targets
 from atlas.outcome import NO_EXIT, TARGET_404, Verdict, echo_404
 from atlas.regions import CONFIGS
 from atlas.storage import connect, seed
@@ -88,20 +88,44 @@ async def test_a_run_records_the_gateways_404_apart(tmp_path, gateway, url, erro
 # The rule on stored counts.
 
 
-@pytest.mark.parametrize(
-    ("counters", "gone"),
-    [
-        ({"status_codes": {"404": 7}, "errors": {"no_exit": 7}}, 7),  # since the rule: exact
-        ({"status_codes": {"404": 7}, "errors": {"no_exit": 4, "target_404": 3}}, 4),
-        ({"status_codes": {"404": 5}, "errors": {"http_status": 9}}, 5),  # stored before it
-        ({"status_codes": {"404": 5}, "errors": {"proxy_connect": 2, "timeout": 3}}, 2),
-        ({"status_codes": {"404": 5}, "errors": {"body_too_large": 5}}, 0),  # a block page
-        ({"status_codes": {"200": 5}, "errors": {}}, 0),
-        ({"errors": {"no_exit": 3, "http_status": 2}}, 3),  # a copy without status codes
-    ],
-)
-def test_count_leaves_out_only_the_gateways_404(counters, gone):
-    assert count(counters) == gone
+def _row(statuses, errors, body=0, successes=0):
+    found = {"errors": errors, "response_body_bytes": body, "successes": successes}
+    return found if statuses is None else found | {"status_codes": statuses}
+
+
+# (row, left out with scope "gateway", left out with scope "every")
+COUNTS = [
+    (_row({"404": 7}, {"no_exit": 7}), 7, 7),  # recorded since the rule: exact
+    (_row({"404": 7}, {"no_exit": 4, "target_404": 3}, 900), 4, 7),
+    (_row({"200": 9, "404": 3}, {"target_404": 3}, 1030, 9), 0, 3),  # pages on the path
+    # Stored before the rule: no body, so the gateway's (10 IPs of 14.5 bytes each)
+    (_row({"200": 10, "404": 5}, {"http_status": 5}, 145, 10), 5, 5),
+    (_row({"200": 10, "404": 2}, {"http_status": 2}, 745, 10), 0, 2),  # two 300-byte pages
+    (_row({"404": 5}, {"proxy_connect": 2, "timeout": 3}), 2, 5),  # a CONNECT answered 404
+    (_row({"404": 5}, {"body_too_large": 5}, 2565), 0, 5),  # a large block page
+    (_row({"200": 5}, {}, 72, 5), 0, 0),
+    (_row(None, {"no_exit": 3, "target_404": 2, "http_status": 2}), 3, 5),  # an old copy
+]
+
+
+@pytest.mark.parametrize(("counters", "gateway", "every"), COUNTS)
+def test_count_leaves_out_the_404s_of_the_scope(counters, gateway, every):
+    assert count(counters) == count(counters, "gateway") == gateway
+    assert count(counters, "every") == every
+
+
+@pytest.mark.parametrize("scope", SCOPES)
+def test_the_live_sql_counts_as_the_calculation(database, monkeypatch, scope):
+    """Detection's SQL (run summaries, run_buckets rows) and count() agree, in both scopes."""
+    monkeypatch.setattr(no_exit_answers, "live", lambda: (ECHO, scope))
+    rows = [c for c, _, _ in COUNTS if "status_codes" in c]
+    summary = f"SELECT {no_exit_answers.sql('r.summary', 'r.target')} FROM (SELECT %s::jsonb "
+    summary += "AS summary,%s AS target) r"
+    with connect(database) as conn:
+        for row in rows:
+            for target, wanted in (("generic_https", count(row, scope)), ("amazon_pdp", 0)):
+                found = conn.execute(summary, (json.dumps(row), target)).fetchone()[0]
+                assert found == wanted, (row, target)
 
 
 def test_strip_takes_the_tries_and_their_error_codes():
@@ -143,6 +167,18 @@ def test_the_calculation_keeps_every_other_count():
     assert exclude({}, runs, buckets) == (buckets, {})  # without the setting: as before
 
 
+@pytest.mark.parametrize(("scope", "completed"), [("gateway", [100]), ("every", [98])])
+def test_a_page_on_the_path_is_left_out_only_with_scope_every(scope, completed):
+    """Two 300-byte 404 pages among 98 successes: failures with "gateway", left out with
+    "every"."""
+    runs = [{"run_key": 1, "scope": {"target": {"id": "generic_http"}}}]
+    bucket = _bucket(1, 100, 98, {"200": 98, "404": 2}, {"http_status": 2})
+    bucket["counters"]["response_body_bytes"] = 98 * 14 + 600
+    config = {"no_exit_answers": RULE["no_exit_answers"] | {"scope": scope}}
+    kept, _ = exclude(config, runs, [bucket])
+    assert [b["counters"]["completed"] for b in kept] == completed
+
+
 def test_the_calculation_adjusts_buckets_and_pulse_slots_together():
     runs = [{"run_key": 1, "scope": {"target": {"id": "generic_http"}}}]
     buckets = [_bucket(1, 100, 0, {"404": 100}, {"http_status": 100})]
@@ -151,15 +187,18 @@ def test_the_calculation_adjusts_buckets_and_pulse_slots_together():
     assert scheduled["pulses"] == []
 
 
-def test_the_methodology_names_the_echo_targets():
+def test_the_methodology_names_the_echo_targets_and_the_scope():
     config, _ = policy.load(CONFIGS / "methodology.toml")
-    assert targets(config) == live() == {"generic_http", "generic_https"}
+    assert rule(config) == live() == (ECHO, "gateway")
     for wrong in (["amazon_pdp"], "generic_http", ["generic_http"] * 2):
         with pytest.raises(ValueError, match="no_exit_answers"):
             targets({"no_exit_answers": {"targets": wrong}})
-    with pytest.raises(ValueError, match="no_exit_answers"):
-        targets({"no_exit_answers": {"targets": [], "status": 404}})
-    assert targets({}) == frozenset()
+    for extra in ({"status": 404}, {"scope": "all"}):
+        with pytest.raises(ValueError, match="no_exit_answers"):
+            rule({"no_exit_answers": {"targets": []} | extra})
+    assert rule({}) == (frozenset(), "gateway") and targets({}) == frozenset()
+    every = {"no_exit_answers": {"targets": ["generic_http"], "scope": "every"}}
+    assert rule(every) == ({"generic_http"}, "every")
 
 
 # Detection, outages and the country status.
@@ -259,3 +298,54 @@ def test_a_country_answered_only_with_the_gateways_404_has_no_exits():
     assert statuses([row], {}) == {"alpha": {"BV": "no_exits"}}
     row |= {"statuses": {"503": 100}, "errors": {"proxy_connect": 100}}
     assert statuses([row], {}) == {"alpha": {"BV": "failing"}}  # alpha has no "no exit" code
+
+
+async def test_a_recount_copies_again_an_hour_copied_before_the_rule(database, tmp_path):
+    """A pulse bucket answered 404 by the gateway, stored before the rule. An hour copied before
+    it has no status codes, so the hourly build keeps the 404s; a recount copies it again."""
+    seed(database)
+    store.initialize(database)  # the calculated layer
+    (alpha,) = products(database, "alpha")
+    rows = [(window(0), 100, 100, 300)]
+    key = await run(tmp_path, database, "pulse", window(0), alpha, "DE", rows, "generic_https")
+    start, as_of = window(0) - timedelta(days=30), window(0) + timedelta(hours=2)
+    with connect(database) as conn:
+        conn.execute(
+            "UPDATE test_runs r SET batch_id=br.batch_id FROM batch_runs br "
+            "WHERE br.run_key=r.run_key"
+        )
+        conn.execute(
+            "UPDATE run_buckets SET status_codes=%s,errors=%s WHERE run_key=%s",
+            (json.dumps({"404": 100}), json.dumps({"proxy_connect": 100}), key),
+        )
+        (copied,) = rollups.scheduled_rows(conn, start, as_of)
+        assert count(copied["counters"]) == 100  # the copy keeps the status codes of a 404
+        conn.execute("UPDATE calculated_pulse_buckets SET extra=extra-'status_codes'")
+        (old,) = rollups.scheduled_rows(conn, start, as_of)
+        assert "status_codes" not in old["counters"] and count(old["counters"]) == 0
+        (again,) = rollups.scheduled_rows(conn, start, as_of, recopy=True)
+        assert again["counters"] == copied["counters"] and count(again["counters"]) == 100
+
+
+@pytest.mark.parametrize(("gone", "closed"), [(95, 0), (75, 1)])
+async def test_the_stale_cleanup_counts_a_pulse_by_its_other_answers(
+    database, db, tmp_path, gone, closed
+):
+    """An open DE outage and a later pulse with 5 successes of 100 answers, `gone` of them the
+    gateway's 404: with 5 other answers (under min_requests) it does not end the outage, with
+    25 it does."""
+    prepare(database, REGIONS)
+    (key,) = await stored(tmp_path, database, [{"404": gone, NO_EXIT: gone}])
+    (alpha,) = products(database, "alpha")
+    with connect(database) as conn:
+        verdict(conn, alpha, "DE", T0 - timedelta(days=1), 80)
+        pulses(conn, alpha, [0, 5], run_keys={1: key})
+        conn.execute(
+            "INSERT INTO outages(product_id,country_code,source,batch_id,started_at) "
+            "SELECT %s,b.country_code,'pulse',b.batch_id,b.scheduled_for FROM test_batches b "
+            "ORDER BY b.scheduled_for LIMIT 1",
+            (alpha,),
+        )
+    assert (await evaluated(db, 0))["closed"] == closed
+    found = query(database, "SELECT ended_at IS NULL FROM outages")
+    assert found == [(not closed,)]

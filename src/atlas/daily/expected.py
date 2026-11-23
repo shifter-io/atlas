@@ -60,7 +60,7 @@ def statuses(rows: list[dict], census: dict) -> dict[str, dict[str, str]]:
     tests, hours = {}, {}
     # A gateway's "no exit" 404 on the daily test's echo target (NO-EXIT-404-1): a "no exit"
     # answer of every network, so a country answered only with it has no exits.
-    gateway_404 = (no_exit_answers.STATUS,) if no_exit_answers.live() else ()
+    gateway_404 = (no_exit_answers.STATUS,) if no_exit_answers.live()[0] else ()
     for row in rows:
         test = DailyTest.of(
             row["unique_ips"], row["requests"], row["statuses"], row["errors"], row["completed"]

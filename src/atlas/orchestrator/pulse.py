@@ -78,10 +78,10 @@ COUNTED = (
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
     f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
 )
-# A window bucket's gateway "no exit" 404s: no requests, and proxy errors when the transport
-# called them so (no_exit_answers.strip()).
-_GONE = no_exit_answers.sql("rb.status_codes", "rb.errors", "b.target_id")
-_PROXY = "+".join(f"coalesce((rb.errors->>'{c}')::bigint,0)" for c in no_exit_answers.GATEWAY[:2])
+# A window bucket's left-out 404s: no requests, and proxy errors when the transport called them
+# so (no_exit_answers.strip()).
+_GONE = no_exit_answers.sql("rb", "b.target_id")
+_PROXY = "+".join(f"coalesce((rb.errors->>'{c}')::bigint,0)" for c in no_exit_answers.PROXY)
 # Per network, region and whether the runs answered mostly "no exit": their countries, requests,
 # connection errors, requests refused at login and answers refused for payment (HTTP 402,
 # PAUSE-402-1) of the pulse runs in the window.
