@@ -10,6 +10,7 @@ import tomllib
 from pathlib import Path
 
 from ..browser.contracts import BROWSER_TARGETS, RUN_TARGETS
+from ..no_exit_answers import targets as no_exit_targets
 from .exclusions import spans as browser_exclusions
 from .outage_time import BASES
 
@@ -158,6 +159,7 @@ KNOWN = {
     "browser_min_requests",
     "browser_window_rule",
     "browser_exclusions",
+    "no_exit_answers",
     "country_verdicts",
     "country_min_ips",
     "success_score",
@@ -216,6 +218,7 @@ def validate(config):
     _uptime(config.get("uptime", {}))
     standing_settings(config)
     browser_exclusions(config)
+    no_exit_targets(config)
     value_basis(config)
     _counts(config.get("slots", {}), SLOTS, 1, "slot")
     _counts(config.get("payload", {}), PAYLOAD, 0, "payload")

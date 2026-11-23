@@ -3,12 +3,13 @@
 A country's status (country_status.status) comes from its latest daily test: its unique IPs and
 how its requests ended, its previous daily test, the most IPs of its daily tests of the
 verdicts.RECENT_DAYS before, its October census peak (the formulas) and the network's "no exit"
-answers (its grammar). The network guard (country_status.network_problem) looks at the network's
-normally big countries tested in the same hour. A country whose status is expected (low
-availability or no exits, country_status.EXPECTED) is not an error anywhere: the hourly pulses
-skip it (pulses.pulse_hour's `skip`; the daily test is its check, so it is pulsed again once a
-daily test finds availability.FEW_IPS), and the hour report lists it on its own "expected" line,
-never as a failure. Whether it counts in the published figures is the methodology's
+answers (its grammar, and a gateway's 404 on the echo targets, no_exit_answers.py). The network
+guard (country_status.network_problem) looks at the network's normally big countries tested in
+the same hour. A country whose status is expected (low availability or no exits,
+country_status.EXPECTED) is not an error anywhere: the hourly pulses skip it (pulses.pulse_hour's
+`skip`; the daily test is its check, so it is pulsed again once a daily test finds
+availability.FEW_IPS), and the hour report lists it on its own "expected" line, never as a
+failure. Whether it counts in the published figures is the methodology's
 country_min_ips (verdicts.py): a country with fewer IPs than FEW_IPS but at least that minimum
 counts from its daily tests alone.
 """
@@ -21,6 +22,7 @@ from pathlib import Path
 
 import psycopg
 
+from .. import no_exit_answers
 from ..availability import census_peaks, no_exit
 from ..country_status import EXPECTED, DailyTest, network_problem, normally_big, status
 from ..verdicts import RECENT
@@ -56,6 +58,9 @@ def statuses(rows: list[dict], census: dict) -> dict[str, dict[str, str]]:
     """{network: {country: status}} of LATEST's rows, with the census peaks ({network:
     {country: IPs}}, availability.census_peaks)."""
     tests, hours = {}, {}
+    # A gateway's "no exit" 404 on the daily test's echo target (NO-EXIT-404-1): a "no exit"
+    # answer of every network, so a country answered only with it has no exits.
+    gateway_404 = (no_exit_answers.STATUS,) if no_exit_answers.live()[0] else ()
     for row in rows:
         test = DailyTest.of(
             row["unique_ips"], row["requests"], row["statuses"], row["errors"], row["completed"]
@@ -70,7 +75,7 @@ def statuses(rows: list[dict], census: dict) -> dict[str, dict[str, str]]:
         hour = row["decided_at"].replace(minute=0, second=0, microsecond=0)
         down = network_problem(hours.get((network, hour), []))
         found.setdefault(network, {})[country] = status(
-            test, no_exit(network), row["previous"], peak, down, row["recent"]
+            test, (*no_exit(network), *gateway_404), row["previous"], peak, down, row["recent"]
         )
     return found
 

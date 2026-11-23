@@ -12,7 +12,7 @@ from pathlib import Path
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .. import detect, timing, traffic, verdicts
+from .. import detect, no_exit_answers, timing, traffic, verdicts
 from ..storage import connect
 from ..targets import registry
 from . import (
@@ -70,9 +70,9 @@ from .window_scoring import score_window as score_window
 from .window_scoring import slot_length as slot_length
 
 SCHEMA_VERSION = 4
-# The calculation's modules (and detect, traffic, browser, verdicts): a change to the code of any
-# changes the id, so the build fingerprint, and of any but implementation.NOT_LISTS the list id,
-# so every list signature.
+# The calculation's modules (and detect, traffic, browser, verdicts, no_exit_answers): a change to
+# the code of any changes the id, so the build fingerprint, and of any but
+# implementation.NOT_LISTS the list id, so every list signature.
 SOURCES = "calculator aggregate policy slim inputs lists list_write incremental hourly fleetsql "
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
 SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all fleet_verdicts"
@@ -80,7 +80,7 @@ SOURCES += " latency_days latency_store latency_carry score_history rollup_days 
 SOURCES += " card_success latency_basket standing"
 IMPLEMENTATION_ID, LISTS_ID = implementation.ids(
     [Path(__file__).with_name(f"{name}.py") for name in SOURCES.split()]
-    + [Path(m.__file__) for m in (detect, traffic, browser, verdicts)]
+    + [Path(m.__file__) for m in (detect, traffic, browser, verdicts, no_exit_answers)]
 )
 # A run's role label, when no calculation_roles row assigns one, follows its batch kind. Roles
 # are display labels: every request counts for every metric whatever its role.

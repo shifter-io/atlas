@@ -33,7 +33,7 @@ from types import SimpleNamespace
 
 from psycopg.rows import dict_row, tuple_row
 
-from .. import verdicts
+from .. import no_exit_answers, verdicts
 from ..estimates import window as estimates
 from ..storage import RAW_DAYS
 from . import (
@@ -206,7 +206,7 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         runs = _reached(conn, runs, as_of, rule)
         buckets = _compacted(conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)))
         buckets = browser.horizon(config, runs, counted_only(runs, buckets), start)
-        buckets = browser.excluded(config, runs, buckets)
+        buckets = _measured(config, runs, browser.excluded(config, runs, buckets), scheduled)
         # The releases of the observations kept: the counted runs' (as incremental's OBSERVED).
         observations = counted_only(runs, enriched_observations(conn, start, as_of)[1])
         release = used_releases(conn, {o["run_key"] for o in observations})
@@ -219,9 +219,9 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         query = RUNS.format(summary=summary, roles=roles, where=WINDOW_RUNS)
         runs = _ruled(_interned(conn, conn.execute(query, bounds)), rule)
         runs = _reached(conn, runs, as_of, rule)
-        buckets = counted_only(runs, _buckets(conn, start, as_of))
+        buckets = counted_only(runs, _buckets(conn, start, as_of, mode == "recount"))
         buckets = browser.horizon(config, runs, buckets, start)
-        buckets = browser.excluded(config, runs, buckets)
+        buckets = _measured(config, runs, browser.excluded(config, runs, buckets), scheduled)
         active = sorted({b["run_key"] for b in buckets})
         release = used_releases(
             conn, [r["run_key"] for r in conn.execute(OBSERVED, (active, start, as_of))]
@@ -248,6 +248,14 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
     fingerprint = fingerprints.of(hashed | {"implementation_id": calculator.IMPLEMENTATION_ID})
     fields = {"runs": runs, "buckets": buckets, "release": release, "signed": signed}
     return Inputs(source=source, fingerprint=fingerprint, as_of=as_of, **common, **fields)
+
+
+def _measured(config, runs, buckets, scheduled):
+    """The bucket rows and, in place, the pulse slots without the gateway's "no exit" 404s of
+    the methodology's [no_exit_answers] (no_exit_answers.py), in both modes."""
+    buckets, gone = no_exit_answers.exclude(config, runs, buckets)
+    scheduled["pulses"] = no_exit_answers.slots(scheduled["pulses"], gone)
+    return buckets
 
 
 def _ruled(runs, rule):
@@ -313,12 +321,13 @@ def periods(as_of):
     }
 
 
-def _buckets(conn, start, as_of):
+def _buckets(conn, start, as_of, recopy=False):
     """The window's buckets: the daily runs', then the batch runs' (rollups.scheduled_rows(), one
-    read), together in the full calculation's order."""
+    read; recopy: a recount's, every hour copied again), together in the full calculation's
+    order."""
     query = BUCKETS.format(join=" JOIN test_runs r USING(run_key)", daily=" AND r.batch_id IS NULL")
     found = _compacted(conn.execute(query, (start, as_of)))
-    found += rollups.scheduled_rows(conn, start, as_of)
+    found += rollups.scheduled_rows(conn, start, as_of, recopy)
     return sorted(found, key=lambda b: (b["bucket_start"], b["run_key"]))
 
 

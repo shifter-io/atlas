@@ -102,6 +102,19 @@ BLOCK_MARKERS = (
 # The target refused us. Other 4xx and 5xx statuses are errors, not refusals.
 BLOCK_STATUSES = frozenset({403, 429, 451})
 
+# NO-EXIT-404-1 (the owner's rule of 2026-11-23, every network): on the echo targets a 404 the
+# gateway sends by itself means it has no exit in the requested country. It is the gateway's when
+# it answers our CONNECT, or a plain-HTTP request with a body of at most GATEWAY_BODY_BYTES (the
+# gateways' no-exit 404 is about 90 bytes on the wire with an empty body; ip-info.com's answers
+# carry a body and its CDN's headers). It is recorded as NO_EXIT, a proxy error, and the
+# methodology's [no_exit_answers] leaves it out of every figure (no_exit_answers.py). Any other
+# 404 on an echo target, inside the tunnel or with a body (an exit device's own page, an ISP's
+# block page), is TARGET_404: a failure, as before, under its own code.
+NO_EXIT_STATUS = 404
+NO_EXIT = "no_exit"
+TARGET_404 = "target_404"
+GATEWAY_BODY_BYTES = 0
+
 # Error codes whose verdict follows from the code alone. Through a proxy every connection
 # goes to the gateway, so a reset connection or a gateway name that does not resolve is the
 # proxy side's failure.
@@ -166,13 +179,24 @@ def failed_response(status: int, body: bytes) -> Verdict:
     return Verdict.ERROR if verdict is Verdict.OK else verdict
 
 
+def echo_404(leg: str, error: str | None, body_bytes: int) -> tuple[str, Verdict | None]:
+    """(error, verdict) of an echo target's 404 that arrived by `leg` (refusals.LEGS: the
+    gateway's answer to our CONNECT, a plain-HTTP answer, or one through a tunnel) with the
+    transport's error code and body length: NO_EXIT for the gateway's, else TARGET_404 with
+    None for the verdict already given."""
+    empty = error == "http_status" and body_bytes <= GATEWAY_BODY_BYTES
+    if leg == "connect" or (leg == "plain" and empty):
+        return NO_EXIT, Verdict.PROXY_ERROR
+    return TARGET_404, None
+
+
 def from_error(error: str | None) -> Verdict:
     """Default verdict for an error code produced without a response to inspect."""
     if error is None:
         return Verdict.OK
     if error in TIMEOUT_CODES:
         return Verdict.TIMEOUT
-    if error in PROXY_ERROR_CODES:
+    if error in PROXY_ERROR_CODES or error == NO_EXIT:
         return Verdict.PROXY_ERROR
     if error == "challenge":
         return Verdict.CHALLENGE

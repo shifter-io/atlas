@@ -24,7 +24,14 @@ from aiohttp_socks import (
 from . import bytes_io, node_dns, refusals
 from .bytes_io import ByteCount, Exchange
 from .models import Outcome, ProxyConfig, RequestContext, RunConfig, protocol_of
-from .outcome import BODY_CODES, Verdict, failed_response, sniff_body
+from .outcome import (
+    BODY_CODES,
+    NO_EXIT_STATUS,
+    Verdict,
+    echo_404,
+    failed_response,
+    sniff_body,
+)
 from .targets import EchoIpTarget, RequestSpec, Target
 
 # The socket of the connection serving the current request. A response whose
@@ -159,11 +166,13 @@ class HttpTransport:
         first, location = await self._attempt(target, spec, proxy, self.config.timeout_seconds)
         upgrade = _https_upgrade(spec.url, first.status, location) if self._mixed else None
         if upgrade is None:
-            return first
+            return _echo_404(first, target, spec, proxy)
         # A 'mixed' network: the same request over HTTPS, within the one timeout budget and
         # on the same resolved proxy (session), measured and billed as one test.
         remaining = max(0.0, self.config.timeout_seconds - first.latency_ms / 1000)
-        second, _ = await self._attempt(target, replace(spec, url=upgrade), proxy, remaining)
+        spec = replace(spec, url=upgrade)
+        second, _ = await self._attempt(target, spec, proxy, remaining)
+        second = _echo_404(second, target, spec, proxy)
         return replace(
             second,
             latency_ms=first.latency_ms + second.latency_ms,
@@ -265,6 +274,17 @@ class HttpTransport:
         if answer is None or status in (None, 200) or not self._refusals.take((answer[0], status)):
             return None
         return refusals.capture(answer[0], status, answer[1], body, _secrets(proxy))
+
+
+def _echo_404(outcome: Outcome, target: Target, spec: RequestSpec, proxy: ProxyConfig) -> Outcome:
+    """The outcome, an echo target's 404 recorded as the gateway's "no exit" answer or as the
+    target side's (outcome.echo_404, NO-EXIT-404-1); every other outcome unchanged."""
+    if outcome.status != NO_EXIT_STATUS or not isinstance(target, EchoIpTarget):
+        return outcome
+    connect = outcome.error == "proxy_connect"
+    leg = "connect" if connect else _leg(spec, proxy)
+    error, verdict = echo_404(leg, outcome.error, outcome.response_body_bytes)
+    return replace(outcome, error=error, verdict=verdict or outcome.verdict)
 
 
 def _leg(spec: RequestSpec, proxy: ProxyConfig) -> str:

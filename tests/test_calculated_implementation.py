@@ -3,7 +3,7 @@ docstrings or modules that make no list keeps every stored list."""
 
 from pathlib import Path
 
-from atlas import detect, traffic, verdicts
+from atlas import detect, no_exit_answers, traffic, verdicts
 from atlas.calculated import (
     aggregate,
     browser,
@@ -78,7 +78,7 @@ def test_only_a_module_of_the_lists_changes_the_list_id(tmp_path):
 def test_the_list_id_leaves_out_only_hashed_modules_that_make_no_list():
     here = Path(calculator.__file__).parent
     paths = [here / f"{name}.py" for name in calculator.SOURCES.split()]
-    paths += [Path(m.__file__) for m in (detect, traffic, browser, verdicts)]
+    paths += [Path(m.__file__) for m in (detect, traffic, browser, verdicts, no_exit_answers)]
     assert (calculator.IMPLEMENTATION_ID, calculator.LISTS_ID) == implementation.ids(paths)
     assert calculator.IMPLEMENTATION_ID != calculator.LISTS_ID
     assert NOT_LISTS <= {p.stem for p in paths}  # no stale name
