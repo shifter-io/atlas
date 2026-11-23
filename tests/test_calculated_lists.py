@@ -18,7 +18,7 @@ from psycopg import sql
 from test_dbserver import apply, toml
 from test_retention import clone
 
-from atlas import detect, traffic, verdicts
+from atlas import detect, no_exit_answers, traffic, verdicts
 from atlas.calculated import (
     browser,
     calculator,
@@ -410,7 +410,8 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("standing.py",)  # a network not measured keeps its standing (STANDING-FREEZE-1)
     here = Path(calculator.__file__).parent
     paths = [here / name for name in hashed]
-    paths += [Path(m.__file__) for m in (detect, traffic, browser, verdicts)]
+    # The rule of the answers no figure counts (NO-EXIT-404-1).
+    paths += [Path(m.__file__) for m in (detect, traffic, browser, verdicts, no_exit_answers)]
     assert (calculator.IMPLEMENTATION_ID, calculator.LISTS_ID) == implementation.ids(paths)
     # calculate() writes through lists.reusing(), which wraps lists.persist with the signatures.
     writers = (lists.reusing, lists.persist, lists.signatures, incremental.read)

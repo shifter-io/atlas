@@ -70,9 +70,9 @@ from .window_scoring import score_window as score_window
 from .window_scoring import slot_length as slot_length
 
 SCHEMA_VERSION = 4
-# The calculation's modules (and detect, traffic, browser, verdicts): a change to the code of any
-# changes the id, so the build fingerprint, and of any but implementation.NOT_LISTS the list id,
-# so every list signature.
+# The calculation's modules (and detect, traffic, browser, verdicts, no_exit_answers): a change to
+# the code of any changes the id, so the build fingerprint, and of any but
+# implementation.NOT_LISTS the list id, so every list signature.
 SOURCES = "calculator aggregate policy slim inputs lists list_write incremental hourly fleetsql "
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
 SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all fleet_verdicts"
