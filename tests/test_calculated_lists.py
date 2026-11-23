@@ -408,6 +408,7 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("card_success.py",)  # the Success x/10's card target tries (SUCCESS-ALL-8-1)
     hashed += ("latency_basket.py",)  # the network latency's country basket (LATENCY-BASKET-1)
     hashed += ("standing.py",)  # a network not measured keeps its standing (STANDING-FREEZE-1)
+    hashed += ("timeout_latency.py",)  # timeouts in the latency at their limit (TIMEOUT-LATENCY-1)
     here = Path(calculator.__file__).parent
     paths = [here / name for name in hashed]
     # The rule of the answers no figure counts (NO-EXIT-404-1).

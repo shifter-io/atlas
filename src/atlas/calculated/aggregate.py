@@ -94,9 +94,10 @@ DAY = timedelta(hours=24)
 def metrics(rows, hours):
     """Request-weighted counters and rates of bucket rows; timed() adds the time weighting.
 
-    Every request counts, whatever the run's role or test. Latency merges the histograms of
-    normal requests only (a row's "light" flag without its "loaded" one: the pulses; daily
-    tests, census and load runs run under load, underload.under_load()).
+    Every request counts, whatever the run's role or test. Latency merges the histograms (the
+    successes, and the timeouts at their run's limit: timeout_latency.py) of normal requests only
+    (a row's "light" flag without its "loaded" one: the pulses; daily tests, census and load runs
+    run under load, underload.under_load()).
     """
     histogram = Histogram(Counter())
     errors = Counter()
@@ -133,7 +134,7 @@ def metrics(rows, hours):
         "coverage": len({r["bucket_start"] for r in rows}) / (hours * 12),
         "coverage_basis": "5-minute buckets",
         "last_observed": max((r["last_observed"] for r in rows), default=None),
-        "latency_basis": "successful light-load requests",
+        "latency_basis": "light-load successes, and timeouts at their run's limit",
         "units": {
             "latency_ms": "milliseconds",
             "success_rate": "fraction",
@@ -442,8 +443,8 @@ def timed(rows, hours, minimum, pulses=(), slot_minutes=None, since=None):
         "that ran during a census; the slot cut by the window start does not vote"
     )
     m["latency_basis"] = (
-        "light-load successes (pulses that did not run during a census), each slot and target "
-        "normalised to equal weight"
+        "light-load successes (pulses that did not run during a census), and timeouts at their "
+        "run's limit, each slot and target normalised to equal weight"
     )
     return m
 

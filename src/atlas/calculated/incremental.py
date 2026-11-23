@@ -50,6 +50,7 @@ from . import (
     parts,
     policy,
     rollups,
+    timeout_latency,
     unique_ips,
 )
 from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists, series_axis
@@ -252,10 +253,11 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
 
 def _measured(config, runs, buckets, scheduled):
     """The bucket rows and, in place, the pulse slots without the gateway's "no exit" 404s of
-    the methodology's [no_exit_answers] (no_exit_answers.py), in both modes."""
+    the methodology's [no_exit_answers] (no_exit_answers.py), in both modes; the rows' timeouts
+    in their latency histograms at their runs' limit (timeout_latency.py)."""
     buckets, gone = no_exit_answers.exclude(config, runs, buckets)
     scheduled["pulses"] = no_exit_answers.slots(scheduled["pulses"], gone)
-    return buckets
+    return timeout_latency.counted(config, runs, buckets)
 
 
 def _ruled(runs, rule):

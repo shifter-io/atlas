@@ -806,6 +806,32 @@ a page on the path). With the methodology's `scope = "every"` instead of the def
 A 404 on a browser target stays a failure. Stored rows are read by the same rule, so one
 recount applies it to every range. The fields and their shape do not change.
 
+### Timeouts in the latency (TIMEOUT-LATENCY-1)
+
+On `generic_http` and `generic_https`, the same way for every network (the owner's decision of
+2026-11-23; the methodology's `timeouts_in_latency`), a request that timed out counts in the
+latency as one answer at its run's timeout limit: the time it waited. The limit is the run's own
+configured timeout (10 s for the pulses and the daily tests, 15 s for census runs today); the
+methodology's `limit_ms` would count every run's at one fixed value instead.
+
+- Counted in: the headline latency (`latencyP50`/`P90`/`P99`, `latencyMean`,
+  `lightLatencyP50/P90/P99`, the basket countries' values), every `latency` series point and
+  `latencySpark`, Speed (`breakdown.speed`, so the score), the latency under load
+  (`underLoadLatencyP50/P90/P99`), the per-country latency block, the other targets'
+  `latencyP50`/`P90`, and the latency changes (`latencyDelta24h`, `latencyDeltaPct`).
+- A time slot still votes only with `[slots] min_latency_successes` (30) successes; its
+  timeouts then weigh in its histogram with its successes.
+- Every other failure ends before the limit and stays out of the latency: refusals (429 and the
+  other blocks), connect, proxy and DNS errors, 404s.
+- The per-place breakdowns' latency (by exit address: region, city, ASN) keeps its successes: a
+  request that timed out has no exit address.
+- The mean moves more than the percentiles: each 1% of timeouts adds about 1% of the limit to
+  it (100 ms at a 10 s limit). p50 barely moves; p90 and above rise for networks with 1-3%
+  timeouts.
+
+Buckets keep each timeout's count, so one recount applies the rule to every range. The fields
+and their shape do not change.
+
 ## Browser targets
 
 Browser targets (`engine = "browser"`, browser pulse) are measured per target

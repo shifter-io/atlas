@@ -36,10 +36,12 @@ def time_slots(rows, pulses=()):
     it merges the histogram of its light-load successes, the normal requests ("light": {target:
     Counter}, "light_successes": {target: n}; rows without the "light" flag or with the "loaded"
     one stay out), and of its successes under load ("loaded", "loaded_successes": rows with the
-    "loaded" flag, the latency target's daily tests, census and load runs). pulses are the
-    product's done pulse runs ({"slot", "requests", "successes", "counted", "during_census"}):
-    the live counters of a run whose artifact was never ingested (counted False) are added to
-    its slot as observed; nothing is invented for requests nobody observed.
+    "loaded" flag, the latency target's daily tests, census and load runs). A row's histogram
+    holds its timeouts too, at their run's limit (timeout_latency.py); the *_successes count its
+    successes only, so a slot votes by its successes. pulses are the product's done pulse runs
+    ({"slot", "requests", "successes", "counted", "during_census"}): the live counters of a run
+    whose artifact was never ingested (counted False) are added to its slot as observed; nothing
+    is invented for requests nobody observed.
     """
     memo = _MEMOS[-1] if _MEMOS else None
     slots = _counted(rows) if memo is None else _memoized(rows, memo)
