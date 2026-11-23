@@ -81,14 +81,14 @@ COUNTED = (
 # A window bucket's left-out 404s: no requests, and proxy errors when the transport called them
 # so (no_exit_answers.strip()).
 _GONE = no_exit_answers.sql("rb", "b.target_id")
-_PROXY = "+".join(f"coalesce((rb.errors->>'{c}')::bigint,0)" for c in no_exit_answers.PROXY)
+_PROXY = no_exit_answers.sql("rb", "b.target_id", proxy=True)
 # Per network, region and whether the runs answered mostly "no exit": their countries, requests,
 # connection errors, requests refused at login and answers refused for payment (HTTP 402,
 # PAUSE-402-1) of the pulse runs in the window.
 WINDOW_STATS_SQL = (
     f"SELECT br.product_id,b.region_id,{pulse_no_exit.EMPTY_SQL} AS empty,"
     f"count(DISTINCT b.country_code)::int AS countries,sum(rb.completed-{_GONE})::bigint AS "
-    f"requests,sum(rb.timeouts+rb.proxy_errors-least({_GONE},{_PROXY},rb.proxy_errors))::bigint "
+    f"requests,sum(rb.timeouts+rb.proxy_errors-least({_PROXY},rb.proxy_errors))::bigint "
     "AS errors,"
     f"sum(coalesce((rb.errors->>'{proxy_login.ERROR}')::bigint,0))::bigint AS refused,"
     f"sum(coalesce((rb.status_codes->>'{proxy_login.PAYMENT_STATUS}')::bigint,0))::bigint AS "

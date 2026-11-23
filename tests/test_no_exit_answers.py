@@ -21,7 +21,18 @@ from atlas.calculated import incremental, policy, rollups, store
 from atlas.daily import tape as daily_tape
 from atlas.daily.expected import statuses
 from atlas.models import Outcome
-from atlas.no_exit_answers import ECHO, SCOPES, count, exclude, live, rule, slots, strip, targets
+from atlas.no_exit_answers import (
+    ECHO,
+    SCOPES,
+    count,
+    exclude,
+    live,
+    rule,
+    slots,
+    split,
+    strip,
+    targets,
+)
 from atlas.outcome import NO_EXIT, TARGET_404, Verdict, echo_404
 from atlas.regions import CONFIGS
 from atlas.storage import connect, seed
@@ -101,7 +112,10 @@ COUNTS = [
     # Stored before the rule: no body, so the gateway's (10 IPs of 14.5 bytes each)
     (_row({"200": 10, "404": 5}, {"http_status": 5}, 145, 10), 5, 5),
     (_row({"200": 10, "404": 2}, {"http_status": 2}, 745, 10), 0, 2),  # two 300-byte pages
-    (_row({"404": 5}, {"proxy_connect": 2, "timeout": 3}), 2, 5),  # a CONNECT answered 404
+    (_row({"404": 5}, {"proxy_connect": 2, "timeout": 3}), 2, 2),  # a CONNECT answered 404
+    # Ten 404 block pages and ten real connection failures: the pages take http_status first.
+    (_row({"404": 10}, {"http_status": 10, "proxy_connect": 10}, 3000), 0, 10),
+    (_row({"404": 5}, {"http_status": 5, "proxy_connect": 10}), 5, 5),  # empty plain 404s
     (_row({"404": 5}, {"body_too_large": 5}, 2565), 0, 5),  # a large block page
     (_row({"200": 5}, {}, 72, 5), 0, 0),
     (_row(None, {"no_exit": 3, "target_404": 2, "http_status": 2}), 3, 5),  # an old copy
@@ -119,22 +133,36 @@ def test_the_live_sql_counts_as_the_calculation(database, monkeypatch, scope):
     """Detection's SQL (run summaries, run_buckets rows) and count() agree, in both scopes."""
     monkeypatch.setattr(no_exit_answers, "live", lambda: (ECHO, scope))
     rows = [c for c, _, _ in COUNTS if "status_codes" in c]
-    summary = f"SELECT {no_exit_answers.sql('r.summary', 'r.target')} FROM (SELECT %s::jsonb "
-    summary += "AS summary,%s AS target) r"
+    left = no_exit_answers.sql("r.summary", "r.target")
+    proxy = no_exit_answers.sql("r.summary", "r.target", proxy=True)
+    summary = f"SELECT {left},{proxy} FROM (SELECT %s::jsonb AS summary,%s AS target) r"
     with connect(database) as conn:
         for row in rows:
-            for target, wanted in (("generic_https", count(row, scope)), ("amazon_pdp", 0)):
-                found = conn.execute(summary, (json.dumps(row), target)).fetchone()[0]
-                assert found == wanted, (row, target)
+            parts = split(row, scope)
+            wanted = (sum(parts.values()), sum(parts.get(c, 0) for c in no_exit_answers.PROXY))
+            for target, expected in (("generic_https", wanted), ("amazon_pdp", (0, 0))):
+                found = conn.execute(summary, (json.dumps(row), target)).fetchone()
+                assert tuple(found) == expected, (row, target)
 
 
 def test_strip_takes_the_tries_and_their_error_codes():
     counters = {"completed": 10, "successes": 4, "proxy_errors": 3}
     counters["errors"] = {"proxy_connect": 3, "http_status": 2, "timeout": 1}
-    found = strip(counters, 4)
+    found = strip(counters, {"proxy_connect": 3, "http_status": 1})
     assert found["completed"] == 6 and found["successes"] == 4
     assert found["errors"] == {"http_status": 1, "timeout": 1} and found["proxy_errors"] == 0
     assert counters["completed"] == 10  # the stored row is not changed
+
+
+def test_empty_plain_404s_leave_the_real_proxy_errors():
+    """Five empty plain 404s and ten connection failures stored before the rule: the 404s
+    leave http_status, the ten proxy errors stay."""
+    counters = _row({"404": 5}, {"http_status": 5, "proxy_connect": 10})
+    counters |= {"completed": 15, "proxy_errors": 10}
+    assert split(counters) == {"http_status": 5}
+    found = strip(counters, split(counters))
+    assert found["completed"] == 10 and found["proxy_errors"] == 10
+    assert found["errors"] == {"proxy_connect": 10}
 
 
 def _bucket(key, completed, successes, statuses, errors):

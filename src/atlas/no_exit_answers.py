@@ -22,7 +22,7 @@ choice is one setting):
   on the wire with an empty body; the other 404s carry pages of about 100 to 7,400 bytes).
 - "every": every 404 of the targets, whoever sent it.
 
-The left-out answers leave the error categories in STRIPPED order. A row without status codes
+split() gives the left-out answers' error codes (STRIPPED order). A row without status codes
 (a pulse copy made before the rule, rollups.py) leaves out the codes recorded since the rule; a
 recount copies every hour again, so one recount applies the rule to the whole stored window. No
 stored row is edited.
@@ -39,9 +39,11 @@ SCOPES = ("gateway", "every")
 ECHO = frozenset({"generic_http", "generic_https"})
 EMPTY_BYTES = 20  # a stored plain 404 is the gateway's under this many body bytes
 ANSWER_BYTES = 16  # an echo success's body at most: an IPv4 address and a newline
-# The error codes a left-out 404 can be recorded under, in the order they give it up; those the
-# transport counts as proxy errors.
-STRIPPED = (NO_EXIT, TARGET_404, "proxy_connect", "http_status", "body_too_large")
+# The error codes a left-out 404 can be recorded under, in the order its 404s are given to them:
+# a stored row's 404s go to its http_status and body_too_large answers (a plain answer) before
+# its proxy_connect ones (a refused CONNECT), so a 404 page never takes a real connection
+# failure's place; those the transport counts as proxy errors.
+STRIPPED = (NO_EXIT, TARGET_404, "http_status", "body_too_large", "proxy_connect")
 PROXY = (NO_EXIT, "proxy_connect")
 INVALID = "Invalid no_exit_answers"
 
@@ -64,8 +66,8 @@ def targets(config) -> frozenset[str]:
     return rule(config)[0]
 
 
-def count(counters: dict, scope: str = SCOPES[0]) -> int:
-    """How many of a bucket's or run summary's answers are left out (module docstring)."""
+def split(counters: dict, scope: str = SCOPES[0]) -> dict[str, int]:
+    """A bucket's or run summary's left-out 404s per error code (module docstring)."""
     errors = counters.get("errors") or {}
 
     def error(code):
@@ -73,34 +75,38 @@ def count(counters: dict, scope: str = SCOPES[0]) -> int:
 
     statuses = counters.get("status_codes")
     if statuses is None:
-        return error(NO_EXIT) + (error(TARGET_404) if scope == "every" else 0)
-    found = int(statuses.get(STATUS) or 0)
-    if scope == "every":
-        return found
-    if error(NO_EXIT) or error(TARGET_404):  # recorded since the rule: exact
-        return error(NO_EXIT)
-    connect = min(found, error("proxy_connect"))
-    plain = min(found - connect, error("http_status"))
-    body = int(counters.get("response_body_bytes") or 0)
-    body -= ANSWER_BYTES * int(counters.get("successes") or 0)
-    return connect + (plain if body < EMPTY_BYTES * plain else 0)
-
-
-def strip(counters: dict, n: int) -> dict:
-    """The counters without n left-out 404s: fewer completed tries, their error codes (STRIPPED
-    order) and, for those the transport called proxy errors (PROXY), fewer proxy errors."""
-    errors, left, proxy = dict(counters["errors"]), n, 0
+        codes = (NO_EXIT, TARGET_404) if scope == "every" else (NO_EXIT,)
+        return {code: error(code) for code in codes if error(code)}
+    left, parts = int(statuses.get(STATUS) or 0), {}
     for code in STRIPPED:
-        taken = min(left, int(errors.get(code) or 0))
-        if taken:
-            errors[code] -= taken
-            errors = {k: v for k, v in errors.items() if v}
-            left -= taken
-            proxy += taken if code in PROXY else 0
-    found = counters | {"completed": counters["completed"] - n, "errors": errors}
+        parts[code] = min(left, error(code))
+        left -= parts[code]
+    if scope == "gateway" and (error(NO_EXIT) or error(TARGET_404)):  # since the rule: exact
+        parts = {NO_EXIT: parts[NO_EXIT]}
+    elif scope == "gateway":  # stored before it: a CONNECT's, and a plain one without a body
+        plain = parts["http_status"]
+        body = int(counters.get("response_body_bytes") or 0)
+        body -= ANSWER_BYTES * int(counters.get("successes") or 0)
+        empty = plain if body < EMPTY_BYTES * plain else 0
+        parts = {"http_status": empty, "proxy_connect": parts["proxy_connect"]}
+    return {k: v for k, v in parts.items() if v}
+
+
+def count(counters: dict, scope: str = SCOPES[0]) -> int:
+    """How many of a bucket's or run summary's answers are left out (split())."""
+    return sum(split(counters, scope).values())
+
+
+def strip(counters: dict, parts: dict[str, int]) -> dict:
+    """The counters without the left-out 404s of split(): fewer completed tries, those error
+    codes and, for those the transport called proxy errors (PROXY), fewer proxy errors."""
+    errors = {k: v - parts.get(k, 0) for k, v in counters["errors"].items()}
+    found = {"completed": counters["completed"] - sum(parts.values())}
+    found["errors"] = {k: v for k, v in errors.items() if v}
     if "proxy_errors" in counters:
+        proxy = sum(parts.get(code, 0) for code in PROXY)
         found["proxy_errors"] = max(0, counters["proxy_errors"] - proxy)
-    return found
+    return counters | found
 
 
 def exclude(config, runs, buckets):
@@ -110,10 +116,11 @@ def exclude(config, runs, buckets):
     keys = {r["run_key"] for r in runs if r["scope"]["target"]["id"] in wanted}
     kept, gone = [], {}
     for b in buckets:
-        n = count(b["counters"], scope) if b["run_key"] in keys else 0
+        parts = split(b["counters"], scope) if b["run_key"] in keys else {}
+        n = sum(parts.values())
         if n:
             gone[b["run_key"]] = gone.get(b["run_key"], 0) + n
-            b = b | {"counters": strip(b["counters"], n)}
+            b = b | {"counters": strip(b["counters"], parts)}
         if b["counters"]["completed"] > 0 or not n:
             kept.append(b)
     return kept, gone
@@ -131,9 +138,10 @@ def slots(pulses, gone):
     return found
 
 
-def sql(row: str, target: str) -> str:
-    """count() in SQL over a row of the live rule (live()) of a target, 0 for a target the rule
-    does not name. row: "r.summary" (a run summary, jsonb) or a run_buckets alias."""
+def sql(row: str, target: str, proxy: bool = False) -> str:
+    """split() in SQL over a row of the live rule (live()) of a target, summed (proxy: only its
+    PROXY codes), 0 for a target the rule does not name. row: "r.summary" (a run summary, jsonb)
+    or a run_buckets alias."""
     names, scope = live()
     summary = row.endswith("summary")
 
@@ -144,15 +152,20 @@ def sql(row: str, target: str) -> str:
     def number(key):
         return f"coalesce(({row}->>'{key}')::bigint,0)" if summary else f"{row}.{key}"
 
-    found, no_exit = code("status_codes", STATUS), code("errors", NO_EXIT)
-    connect = f"least({found},{code('errors', 'proxy_connect')})"
-    plain = f"least({found}-{connect},{code('errors', 'http_status')})"
+    found, before, parts = code("status_codes", STATUS), "0", {}
+    for key in STRIPPED:  # each code's share of the 404s, as split() gives them
+        parts[key] = f"greatest(0,least({code('errors', key)},{found}-({before})))"
+        before += f"+{code('errors', key)}"
     body = f"{number('response_body_bytes')}-{ANSWER_BYTES}*{number('successes')}"
-    gateway = (
-        f"CASE WHEN {no_exit}>0 OR {code('errors', TARGET_404)}>0 THEN {no_exit} "
-        f"ELSE {connect}+CASE WHEN {body}<{EMPTY_BYTES}*{plain} THEN {plain} ELSE 0 END END"
-    )
-    left = found if scope == "every" else gateway
+    plain = parts["http_status"]
+    empty = f"CASE WHEN {body}<{EMPTY_BYTES}*{plain} THEN {plain} ELSE 0 END"
+    kept = ("proxy_connect",) if proxy else ("http_status", "proxy_connect")
+    if scope == "every":
+        left = "+".join(parts[k] for k in (PROXY if proxy else STRIPPED))
+    else:
+        older = "+".join(empty if k == "http_status" else parts[k] for k in kept)
+        recorded = f"{code('errors', NO_EXIT)}>0 OR {code('errors', TARGET_404)}>0"
+        left = f"CASE WHEN {recorded} THEN {parts[NO_EXIT]} ELSE {older} END"
     listed = ",".join(sorted(names))
     return f"(CASE WHEN {target}=ANY('{{{listed}}}'::text[]) THEN {left} ELSE 0 END)"
 
