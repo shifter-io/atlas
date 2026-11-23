@@ -23,11 +23,12 @@ the newest run key. Rollups of hours over a day older than the window are delete
 
 scheduled_rows() reads the batch runs' buckets the same way (refresh_buckets(): a closed hour is
 copied when it has no copy, holds a run newer than its copy, or holds a run outside a batch,
-recorded in calculated_pulse_rollups.loose, that a batch owns now). A copy keeps every column but
-the status codes, which nothing reads, and the rows it returns hold the same counters as the full
-mode's (run_bucket_counters()) less those, the bucket label and the histogram format. The census
-overlaps, done pulse runs and tested spans come from one read of the batch runs (batch_inputs()),
-not three (SUM-MEM-1).
+recorded in calculated_pulse_rollups.loose, that a batch owns now; a recount copies every hour
+again). A copy keeps every column but the status codes, except a bucket's with a 404 (EXTRA,
+NO-EXIT-404-1), and the rows it returns hold the same counters as the full mode's
+(run_bucket_counters()) less the other status codes, the bucket label and the histogram
+format. The census overlaps, done pulse runs and tested spans come from one read of the batch
+runs (batch_inputs()), not three (SUM-MEM-1).
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ from itertools import accumulate, pairwise
 from psycopg.rows import dict_row, tuple_row
 from psycopg.types.json import Jsonb
 
-from .. import verdicts
+from .. import no_exit_answers, verdicts
 from ..storage import connect
 from . import rollup_days, scheduled
 from .aggregate import census_overlaps
@@ -141,11 +142,18 @@ BUCKET = ",".join(
         *("histogram_steps", "histogram_counts", "outcome_counters", *OUTCOMES, "extra"),
     )
 )
+# A bucket with a 404 is copied with its status codes in `extra`, which _bucket() reads into its
+# counters as the full mode's are: no_exit_answers.count() tells the gateway's 404s from them.
+EXTRA = (
+    f"CASE WHEN b.status_codes ? '{no_exit_answers.STATUS}' THEN coalesce(b.extra,'{{}}')"
+    "||jsonb_build_object('status_codes',b.status_codes) ELSE b.extra END"
+)
+COPIED = BUCKET.replace("b.extra", EXTRA)  # BUCKET from run_buckets, as a copy holds it
 BATCH_BUCKETS = "FROM run_buckets b JOIN test_runs r USING(run_key) WHERE r.batch_id IS NOT NULL "
 _LAST = BUCKET.count(",") + 2  # scheduled_rows()' network column, after BUCKET's
 RANGE = "b.bucket_start>=%(lo)s AND b.bucket_start<%(hi)s"
 WRITE_BUCKETS = (
-    f"INSERT INTO calculated_pulse_buckets SELECT {BIN.format('b')},{BUCKET} {BATCH_BUCKETS}"
+    f"INSERT INTO calculated_pulse_buckets SELECT {BIN.format('b')},{COPIED} {BATCH_BUCKETS}"
     f"AND {RANGE}"
 )
 # Each copied hour of [lo, hi): the newest run key and the runs outside a batch it holds.
@@ -207,13 +215,14 @@ def scheduled_inputs(conn, as_of, timed_target, geo=None, rule=False):
     )
 
 
-def scheduled_rows(conn, start, as_of):
+def scheduled_rows(conn, start, as_of, recopy=False):
     """Every batch run's request buckets in [start, as_of), ordered by bucket_start and run_key:
-    whole hours from their copies, the hours an edge falls inside from run_buckets. They are read
-    network by network, so a network's rows share their memory pages with no other network's: a
-    worker (parallel_measure.py) copies the pages of its networks only (CALC-SCALE-1)."""
+    whole hours from their copies (recopy: every one copied again), the hours an edge falls
+    inside from run_buckets. They are read network by network, so a network's rows share their
+    memory pages with no other network's: a worker (parallel_measure.py) copies the pages of its
+    networks only (CALC-SCALE-1)."""
     hours, edges = spans((start, as_of))
-    refresh_buckets(conn, hours)
+    refresh_buckets(conn, hours, recopy)
     params, raw = {"hours": hours}, []
     for n, (lo, hi) in enumerate(edges):
         raw.append(f"b.bucket_start>=%(lo{n})s AND b.bucket_start<%(hi{n})s")
@@ -222,7 +231,7 @@ def scheduled_rows(conn, start, as_of):
     network += "ON s.scope_id=r.scope_id"
     query = (
         f"SELECT {BUCKET},{network.format('calculated_pulse_buckets b')} "
-        f"WHERE b.hour=ANY(%(hours)s) UNION ALL SELECT {BUCKET},{network.format('run_buckets b')} "
+        f"WHERE b.hour=ANY(%(hours)s) UNION ALL SELECT {COPIED},{network.format('run_buckets b')} "
         f"WHERE r.batch_id IS NOT NULL AND ({' OR '.join(raw) or 'false'}) ORDER BY {_LAST},1,2"
     )
     rows = conn.cursor(row_factory=tuple_row).execute(query, params)
@@ -244,11 +253,12 @@ def _bucket(row):
     return {"bucket_start": at, "run_key": run_key, "counters": counters, "outcome": outcome}
 
 
-def refresh_buckets(conn, hours):
+def refresh_buckets(conn, hours, recopy=False):
     """Copy the batch-run buckets of the hours (ascending) that have no copy or a stale one
-    (module docstring), and record the newest run key for every one of them."""
+    (module docstring; recopy: every hour, as a recount does, so copies made under an older
+    rule are replaced), and record the newest run key for every one of them."""
     window = _window(conn, hours, "calculated_pulse_buckets", "calculated_pulse_rollups")
-    stale = [row["hour"] for row in _rows(conn, BUCKETS_STALE, window)]
+    stale = list(hours) if recopy else [row["hour"] for row in _rows(conn, BUCKETS_STALE, window)]
     if stale:
         conn.execute("DELETE FROM calculated_pulse_buckets WHERE hour=ANY(%s)", (stale,))
     for lo, hi in _ranges(stale):

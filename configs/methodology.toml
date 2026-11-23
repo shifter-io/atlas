@@ -72,6 +72,18 @@ browser_window_rule = "whole_run"
 browser_exclusions = [
   { target = "amazon_pdp", engine = "chrome", started_from = "2026-11-17T19:07:00Z", started_before = "2026-11-20T13:10:00Z", reason = "chrome_behind_stable" },
 ]
+# A gateway's "no exit in this country" 404 is not measured (NO-EXIT-404-1, the owner's rule of
+# 2026-11-23, the same for every network; src/atlas/no_exit_answers.py). On these targets a 404
+# the network's gateway sends by itself (its answer to our CONNECT, or a plain-HTTP 404 with an
+# empty body: the gateways' no-exit 404 is about 90 bytes with an empty body) means it has no exit
+# in the requested country. It is left out of every figure: tries, successes and failures, the
+# success rate, the Success x/10, block and challenge rates, error categories, pulse slots and
+# uptime, detection and outages. Any other 404 on these targets (inside the tunnel, or with a
+# body: an exit device's own page, an ISP's block page) is recorded as target_404 and stays a
+# failure; a 404 on a browser target stays a failure. Rows stored before the rule are read by
+# the same rule (no row is edited), so one recount applies it to the window. [] turns it off.
+no_exit_answers = { targets = ["generic_http", "generic_https"] }
+
 # A network's country counts only while its latest daily test there found at least
 # country_min_ips unique IPs (the owner's decisions of 2026-11-15, #1137, and 2026-11-16, #1253:
 # a country counts as soon as its daily test finds one exit IP; one with none is "no exits").

@@ -33,6 +33,7 @@ from __future__ import annotations
 import re
 from datetime import timedelta
 
+from . import no_exit_answers
 from .availability import no_exit
 from .country_status import GUARD_MIN
 from .providers.grammar import grammar_ids
@@ -57,11 +58,12 @@ def _codes_sql(product: str) -> str:
     return f"CASE {found} " + "".join(cases) + "ELSE '{}'::text[] END"
 
 
-# Whether a run (r: its test_runs row, br: its batch_runs row) answered mostly "no exit".
+# Whether a run (r: its test_runs row, br: its batch_runs row, b: its batch) answered mostly "no
+# exit", of its answers that are tries (a gateway's 404 is none: no_exit_answers.py).
 EMPTY_SQL = (
     "coalesce((SELECT sum(s.value::bigint) FROM jsonb_each_text(r.summary->'status_codes') s "
     f"WHERE s.key=ANY({_codes_sql('br.product_id')}))"
-    f">={SHARE}*nullif((r.summary->>'completed')::bigint,0),false)"
+    f">={SHARE}*nullif((r.summary->>'completed')::bigint-{no_exit_answers.run_sql()},0),false)"
 )
 NO_EXIT_SQL = f"{EMPTY_SQL} AS no_exit"
 # The network's pulses that had finished by the judged batch's finish: live detect, which judges a

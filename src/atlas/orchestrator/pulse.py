@@ -39,7 +39,7 @@ from typing import Any
 
 import psycopg
 
-from .. import proxy_login, pulse_no_exit, verdicts
+from .. import no_exit_answers, proxy_login, pulse_no_exit, verdicts
 from ..daily import DAILY, MARKER
 from ..detect import LOCK as DETECT_LOCK
 from ..detect import RUN_P50_SQL, country_rule
@@ -78,13 +78,18 @@ COUNTED = (
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
     f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
 )
+# A window bucket's gateway "no exit" 404s: no requests, and proxy errors when the transport
+# called them so (no_exit_answers.strip()).
+_GONE = no_exit_answers.sql("rb.status_codes", "rb.errors", "b.target_id")
+_PROXY = "+".join(f"coalesce((rb.errors->>'{c}')::bigint,0)" for c in no_exit_answers.GATEWAY[:2])
 # Per network, region and whether the runs answered mostly "no exit": their countries, requests,
 # connection errors, requests refused at login and answers refused for payment (HTTP 402,
 # PAUSE-402-1) of the pulse runs in the window.
 WINDOW_STATS_SQL = (
     f"SELECT br.product_id,b.region_id,{pulse_no_exit.EMPTY_SQL} AS empty,"
-    "count(DISTINCT b.country_code)::int AS countries,sum(rb.completed)::bigint AS requests,"
-    "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors,"
+    f"count(DISTINCT b.country_code)::int AS countries,sum(rb.completed-{_GONE})::bigint AS "
+    f"requests,sum(rb.timeouts+rb.proxy_errors-least({_GONE},{_PROXY},rb.proxy_errors))::bigint "
+    "AS errors,"
     f"sum(coalesce((rb.errors->>'{proxy_login.ERROR}')::bigint,0))::bigint AS refused,"
     f"sum(coalesce((rb.status_codes->>'{proxy_login.PAYMENT_STATUS}')::bigint,0))::bigint AS "
     "payment FROM " + PULSES + RUNS + COUNTED + "JOIN run_buckets rb ON rb.run_key=br.run_key "
@@ -424,6 +429,7 @@ async def evaluate(db: Database, now: datetime | None = None) -> dict[str, Any]:
             await put_setting(conn, "pulse.evaluated_until", start.isoformat())
             start += WINDOW
         totals["closed"] += await pulse_stale.close_stale(conn, now)
+        totals["closed"] += await pulse_stale.close_not_measured(conn)
         if cfg["verdicts"]:
             totals["closed"] += await pulse_stale.close_ignored(conn, now, cfg["verdicts"])
     return totals

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from . import proxy_login, pulse_no_exit, verdicts
+from . import no_exit_answers, proxy_login, pulse_no_exit, verdicts
 from .daily import DAILY, MARKER
 
 # Incidents that stay open until a later pulse of the same series is healthy again.
@@ -177,14 +177,17 @@ def _close_outages(cur, batch, product, *, source=None):
 def _pulse_history(cur, cfg, batch, product, rule=False):
     """The series' trailing baseline: its last done pulses with requests before this batch (with
     the rule, of the time its country counted), but those mostly refused at login (proxy_login)
-    or answered mostly "no exit" (pulse_no_exit)."""
+    or answered mostly "no exit" (pulse_no_exit); a gateway's "no exit" 404 is no request
+    (no_exit_answers)."""
+    gone = no_exit_answers.run_sql()
     return cur.execute(
-        "SELECT br.batch_id,b.finished_at,b.scheduled_for,br.requests,br.successes,br.challenges,"
+        f"SELECT br.batch_id,b.finished_at,b.scheduled_for,br.requests-{gone} AS requests,"
+        "br.successes,br.challenges,"
         "br.blocks,br.run_key FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "LEFT JOIN test_runs r ON r.run_key=br.run_key "
         f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
         "WHERE b.kind='pulse' AND b.country_code=%(country)s AND b.target_id=%(target)s "
-        "AND br.product_id=%(product)s AND br.status='done' AND br.requests>0 "
+        f"AND br.product_id=%(product)s AND br.status='done' AND br.requests-{gone}>0 "
         f"AND {proxy_login.MEASURED_SQL} AND NOT {pulse_no_exit.EMPTY_SQL} "
         "AND b.scheduled_for<%(slot)s ORDER BY b.scheduled_for DESC LIMIT %(n)s",
         {

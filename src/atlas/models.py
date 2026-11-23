@@ -23,6 +23,9 @@ ErrorCode = Literal[
     # A 200 whose body is a challenge or block page (see outcome.sniff_body).
     "challenge",
     "blocked",
+    # An echo target's 404: the gateway's "no exit in the country", or any other (outcome.echo_404).
+    "no_exit",
+    "target_404",
     # Browser tries (K-BP2), all under the error verdict (see browser.contracts.OUTCOMES).
     "login_wall",
     "no_content",

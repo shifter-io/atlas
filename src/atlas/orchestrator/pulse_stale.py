@@ -13,6 +13,11 @@ with at least detect's min_requests (configs/methodology.toml), and the first on
 have started SETTLED before now, so detect judged it first. An outage whose later pulses all
 fail, or that has none (an unmeasured network), stays open. A network-wide outage (batch_id
 NULL) is the evaluator's own windows' (pulse.py).
+
+A gateway's "no exit" 404 is no request (NO-EXIT-404-1, no_exit_answers.py): a pulse counts by
+its other requests, and an open per-country pulse outage whose opening pulse had fewer than
+min_requests of them, so detect would not judge it now, is closed at its own start with
+end_reason 'not_measured' and no tape event (close_not_measured()): it adds no downtime.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from datetime import datetime, timedelta
 
 import psycopg
 
-from .. import verdicts
+from .. import no_exit_answers, verdicts
 from ..detect import thresholds
 
 SETTLED = timedelta(hours=1)  # detect judges a batch within minutes; this leaves it the first say
@@ -40,7 +45,8 @@ WITH open AS (
   br.successes>0 AS ok FROM open o JOIN test_batches b ON b.kind='pulse'
   AND b.country_code=o.country_code AND b.scheduled_for>=o.slot JOIN batch_runs br
   ON br.batch_id=b.batch_id AND br.product_id=o.product_id AND br.status='done'
-  AND br.requests>=%(min_requests)s
+  LEFT JOIN test_runs r ON r.run_key=br.run_key
+  WHERE br.requests-{gone}>=%(min_requests)s
 ), slots AS (
   SELECT outage_id,slot,bool_or(ok) AS ok FROM pulses GROUP BY 1,2
 ), ends AS (
@@ -51,7 +57,17 @@ WITH open AS (
 SELECT DISTINCT ON (p.outage_id) p.outage_id,p.batch_id,p.at,p.slot,o.product_id,o.country_code,
 o.started_at FROM pulses p JOIN ends e ON e.outage_id=p.outage_id AND e.slot=p.slot AND p.ok
 JOIN open o ON o.outage_id=p.outage_id ORDER BY p.outage_id,p.at,p.batch_id
-"""
+""".replace("{gone}", no_exit_answers.run_sql())
+# The open per-country pulse outages whose opening pulse measured under min_requests requests
+# once its gateway 404s are left out.
+_GONE = no_exit_answers.run_sql()
+UNMEASURED_SQL = (
+    "UPDATE outages o SET ended_at=o.started_at,end_reason='not_measured' FROM test_batches b "
+    "JOIN batch_runs br ON br.batch_id=b.batch_id LEFT JOIN test_runs r ON r.run_key=br.run_key "
+    "WHERE o.source='pulse' AND o.batch_id=b.batch_id AND br.product_id=o.product_id "
+    f"AND o.ended_at IS NULL AND {_GONE}>0 AND br.requests-{_GONE}<%(min_requests)s "
+    "RETURNING o.outage_id"
+)
 CLOSE_SQL = (
     "UPDATE outages SET ended_at=greatest(started_at,%s) WHERE outage_id=%s AND ended_at IS NULL "
     "RETURNING ended_at"
@@ -96,6 +112,14 @@ async def close_stale(conn: psycopg.AsyncConnection, now: datetime) -> int:
         await conn.execute(EVENT_SQL, params | {"since": row["started_at"].isoformat()})
         closed += 1
     return closed
+
+
+async def close_not_measured(conn: psycopg.AsyncConnection) -> int:
+    """Close the open per-country pulse outages opened by a pulse that measured under detect's
+    min_requests requests once its gateway "no exit" 404s are left out (module docstring), at
+    their own start; returns how many. Idempotent. Call inside the evaluator's transaction."""
+    params = {"min_requests": int(thresholds()["min_requests"])}
+    return len(await (await conn.execute(UNMEASURED_SQL, params)).fetchall())
 
 
 async def close_ignored(conn: psycopg.AsyncConnection, now: datetime, rule: int) -> int:

@@ -25,6 +25,7 @@ from psycopg.rows import dict_row
 from test_calculated_hourly_reads import DAY, HOUR, History, floor_hour
 from test_calculated_incremental import assert_equal
 
+from atlas import no_exit_answers
 from atlas.calculated import rollups, scheduled, store
 from atlas.calculated.incremental import BUCKETS
 from atlas.partitions import partition
@@ -137,14 +138,18 @@ def compare(database, as_of):
 
 def batch_rows(conn, start, as_of):
     """The full mode's buckets of the batch runs (incremental.BUCKETS), less the bucket label, the
-    status codes and the histogram format the copies leave out."""
+    status codes (but a bucket's with a 404: rollups.EXTRA) and the histogram format the copies
+    leave out."""
     query = BUCKETS.format(
         join=" JOIN test_runs r USING(run_key)", daily=" AND r.batch_id IS NOT NULL"
     )
     rows = conn.execute(query, (start, as_of)).fetchall()
     for row in rows:
         counters = row["counters"]
-        assert counters.pop("bucket_start") and counters.pop("status_codes") is not None
+        statuses = counters.pop("status_codes")
+        assert counters.pop("bucket_start") and statuses is not None
+        if no_exit_answers.STATUS in statuses:
+            counters["status_codes"] = statuses
         bins = counters.pop("latency_histogram")["bins"]
         counters["latency_histogram"] = {"bins": [tuple(b) for b in bins]}
     return rows

@@ -784,6 +784,26 @@ or an active outage in that bucket. Buckets without monitoring evidence, and
 older snapshots without this field, remain null. The shared Availability metric
 card displays this series for every tested product category.
 
+### Gateway "no exit" answers (NO-EXIT-404-1)
+
+On `generic_http` and `generic_https`, the same way for every network (the owner's rule of
+2026-11-23; the methodology's `no_exit_answers`), a 404 that the network's gateway sends by
+itself means the gateway has no exit in the requested country. It is the gateway's answer to
+our CONNECT, or a plain-HTTP 404 with an empty body. Such an answer is not a try: it is left
+out of every figure.
+
+- Left out of: `requests` and every success rate, `successScore` (the Success x/10), the block
+  and challenge rates, `error_categories`, the target scores and `networkBlocked`.
+- Left out of the pulse slots, so of `uptime` and coverage.
+- It opens no outage and no `down` or `success_drop` event; an open outage that such answers
+  opened ends at its start.
+- A country answered only so has no exit IP, so it is `no_exits` and does not count.
+
+Any other 404 on these targets stays a failure under its own error category `target_404`. That
+is a 404 inside the tunnel, or one with a body (an exit device's own page, an ISP's block page).
+A 404 on a browser target stays a failure. Stored rows are read by the same rule, so one
+recount applies it to every range. The fields and their shape do not change.
+
 ## Browser targets
 
 Browser targets (`engine = "browser"`, browser pulse) are measured per target

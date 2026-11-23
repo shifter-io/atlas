@@ -28,7 +28,7 @@ from datetime import UTC, datetime, timedelta
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from . import proxy_login, pulse_no_exit, verdicts
+from . import no_exit_answers, proxy_login, pulse_no_exit, verdicts
 from .calculated import policy
 from .calculated.policy import events as event_settings
 from .outages import (
@@ -176,7 +176,8 @@ def country_rule(path=None):
 # mostly "no exit".
 RUNS = (
     "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished,"
-    f"{proxy_login.REFUSED_SQL},{pulse_no_exit.NO_EXIT_SQL} "
+    f"{proxy_login.REFUSED_SQL},{pulse_no_exit.NO_EXIT_SQL},"
+    f"{no_exit_answers.run_sql()} AS not_measured "
     "FROM batch_runs br JOIN test_batches b USING(batch_id) "
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
     f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
@@ -324,7 +325,7 @@ class Lookup:
 def _pulse(lookup, cfg, batch, runs, emit):
     p50 = lookup.p50([r["run_key"] for r in runs if r["run_key"]])
     common = {"region": batch["region"], "batch_finished_at": timestamp(batch["finished_at"])}
-    for run in runs:
+    for run in map(no_exit_answers.measured, runs):  # a gateway's "no exit" 404 is no try
         product, requests = run["product_id"], run["requests"]
         if not requests or proxy_login.refused(run.get("refused"), requests):
             continue  # nothing measured, or our login refused: not the network's to judge
