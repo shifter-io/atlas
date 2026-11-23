@@ -404,7 +404,7 @@ def _judge_success(lookup, cfg, batch, emit, p):
         if p.open_kind != "down" and not lookup.failed_before(batch, p.product):
             return False  # a first pulse without success waits for the series' next one
         # Each such pulse may open the outage: the slot's other target may have left it to this one.
-        since = _open_outage(lookup.cur, batch, p.product)
+        since = _open_outage(lookup.cur, batch, p.product, lookup.rule)
         if p.open_kind != "down":
             emit(
                 "down",

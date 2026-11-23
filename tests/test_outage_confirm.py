@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
 from calculated_pulse_cases import SETTINGS, T0, after, pulses
 from census_pulse_cases import product
 from test_pulse_no_exit import stored
@@ -128,3 +129,32 @@ async def test_a_pulse_refused_at_login_is_no_confirmation(database, tmp_path):
         events, outages = _tape(conn)
         assert [e[0] for e in events] == ["pulse_finished", "down"]
         assert outages == [(LAST_HEALTHY, None)]
+
+
+def _late(conn, target, i):
+    """Pulse i on the target finishes 10 minutes later, so it is judged after the other one."""
+    conn.execute(
+        "UPDATE test_batches SET finished_at=finished_at+interval '10 minutes' "
+        "WHERE target_id=%s AND scheduled_for=%s",
+        (target, T0 + timedelta(minutes=30 * i)),
+    )
+
+
+@pytest.mark.parametrize("last", ["generic_http", "generic_https"])
+def test_another_targets_first_failure_holds_the_outage(database, last):
+    """HTTP fails at 6 and 7, HTTPS only at 7 and 8, HTTP still at 8. At 7 HTTPS's failure is
+    its first: no outage, whichever target is judged last. At 8 both series are 'down' and the
+    outage opens from HTTPS's last healthy pulse (6); HTTPS through at 9 ends it."""
+    seed(database)
+    with connect(database) as conn:
+        alpha = product(conn)
+        pulses(conn, alpha, [*HEALTHY, 0, 0, 0, 0])
+        pulses(conn, alpha, [*HEALTHY, 95, 0, 0, 95], target="generic_https")
+        _late(conn, last, 7)
+        detect(conn, after(7) + timedelta(minutes=10), config=SETTINGS)
+        assert _tape(conn)[1] == []
+        _step(conn, 9)
+        downs = conn.execute("SELECT target_id FROM test_events WHERE kind='down' ORDER BY 1")
+        assert [row[0] for row in downs] == ["generic_http", "generic_https"]
+        healthy = T0 + timedelta(minutes=30 * 6 + 1)
+        assert _tape(conn)[1] == [(healthy, T0 + timedelta(minutes=30 * 9))]
