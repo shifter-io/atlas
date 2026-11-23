@@ -824,7 +824,8 @@ methodology's `limit_ms` would count every run's at one fixed value instead.
 - Every other failure ends before the limit and stays out of the latency: refusals (429 and the
   other blocks), connect, proxy and DNS errors, 404s.
 - The per-place breakdowns' latency (by exit address: region, city, ASN) keeps its successes: a
-  request that timed out has no exit address.
+  request that timed out has no exit address. Only the requested-country row of a light run
+  without exit addresses counts its timeouts too.
 - The mean moves more than the percentiles: each 1% of timeouts adds about 1% of the limit to
   it (100 ms at a 10 s limit). p50 barely moves; p90 and above rise for networks with 1-3%
   timeouts.

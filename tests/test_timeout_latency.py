@@ -2,6 +2,8 @@
 for every network; a time slot still votes only with min_latency_successes successes, and every
 other failure stays out of the latency (atlas/calculated/timeout_latency.py)."""
 
+import gc
+import os
 import random
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
@@ -10,7 +12,7 @@ from pathlib import Path
 import pytest
 from scoring_cases import row
 
-from atlas.calculated import incremental, latency_basket
+from atlas.calculated import incremental, latency_basket, parallel_measure
 from atlas.calculated.bins import Bins
 from atlas.calculated.latency import percentiles
 from atlas.calculated.policy import load, validate
@@ -82,6 +84,11 @@ def test_a_timeout_is_one_bin_at_the_limit_and_the_successes_stay():
     assert histogram(r) == {300: 90}  # the stored row is not edited
     same = answered(T0, 300, 90, 0, other=5)["counters"]
     assert with_timeouts(same, 10000) is same
+    late = answered(T0, 10000, 3, 2)["counters"]
+    late["latency_histogram"] = {"bins": [(9, 1), (10001, 2)]}  # a success over the limit
+    assert histogram({"counters": with_timeouts(late, 10000)}) == {9: 1, 10000: 2, 10001: 2}
+    late["latency_histogram"]["bins"] = [(10000, 3)]  # a success right at the limit: one bin
+    assert list(with_timeouts(late, 10000)["latency_histogram"]["bins"]) == [(10000, 5)]
 
 
 def test_the_calculation_reads_the_rows_with_their_timeouts():
@@ -158,3 +165,40 @@ def test_the_basket_country_latency_is_the_investigations_what_if():
     expected = reference(slots["JP"], 10000)
     assert {k: found["JP"][k] for k in expected} == expected
     assert found["JP"]["p99"] == 10000  # some slots time out often enough to reach the p99
+
+
+def copied(groups):
+    """The private memory (MB) a forked worker gains reading every row of groups[0] (as
+    test_calc_parallel_measure.copied())."""
+    gc.freeze()
+    read, write = os.pipe()
+    pid = os.fork()
+    if pid == 0:  # the worker
+        before = parallel_measure.private_mb()
+        touched = sum(row["counters"]["completed"] for row in groups[0])
+        os.write(write, f"{parallel_measure.private_mb() - before} {touched}".encode())
+        os._exit(0)
+    os.close(write)
+    found = int(os.read(read, 100).split()[0])
+    os.waitpid(pid, 0)
+    gc.unfreeze()
+    return found
+
+
+@pytest.mark.skipif(not Path("/proc/self/smaps_rollup").exists(), reason="Linux /proc only")
+def test_the_rows_with_timeouts_are_made_network_by_network():
+    """Rows in time order, four networks interleaved: the rows made for their timeouts are made
+    network by network, so a worker reading one network copies about a quarter of them."""
+    runs = [run(k) | {"product_id": k} for k in range(4)]
+
+    def bucket(n):
+        counters = {"completed": n, "successes": 1, "errors": {"timeout": 1}}
+        counters["latency_histogram"] = {"bins": Bins.of([(300, 1)])}
+        return {"run_key": n % 4, "bucket_start": n, "counters": counters}
+
+    rows = counted(RULE, runs, [bucket(n) for n in range(200_000)])
+    assert [r["bucket_start"] for r in rows[:5]] == [0, 1, 2, 3, 4]  # in their order
+    own = copied([[r for r in rows if r["run_key"] == g] for g in range(4)])
+    mixed = [r | {"counters": dict(r["counters"])} for r in rows]  # made in time order
+    interleaved = copied([[r for r in mixed if r["run_key"] == g] for g in range(4)])
+    assert interleaved > 10 and own < interleaved / 2, (own, interleaved)

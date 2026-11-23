@@ -11,8 +11,9 @@ own rule: the headline over the country basket, every series point, the latency 
 (daily tests, census and load runs), the per-country latency block, the other targets'
 display-only latency, the latency changes, and the mean beside the percentiles. Every other
 failure (a refusal, a block, a connect, proxy or DNS error, a 404) ends before the limit and
-stays out of the latency, as before. The per-place breakdowns' latency (exit address rows) keeps
-its successes: a request that timed out has no exit address.
+stays out of the latency, as before. The per-place breakdowns' latency by exit address keeps its
+successes (a request that timed out has no exit address); the requested-country row of a light
+run without exit addresses (inputs.requested_geo()) counts its timeouts too.
 
 No stored row is edited: every bucket keeps its timeouts' count, so one recount applies the
 rule to the whole stored window.
@@ -64,20 +65,30 @@ def with_timeouts(counters: dict, limit: int) -> dict:
     if not n:
         return counters
     histogram = counters["latency_histogram"]
-    bins = Counter(dict(histogram["bins"]))
-    bins[limit] += n
-    return counters | {"latency_histogram": histogram | {"bins": Bins.of(sorted(bins.items()))}}
+    pairs = list(histogram["bins"])
+    if pairs and pairs[-1][0] >= limit:  # a success at or over the limit: merge the bins
+        pairs = sorted((Counter(dict(pairs)) + Counter({limit: n})).items())
+    else:  # the usual case: every success under the limit
+        pairs.append((limit, n))
+    return counters | {"latency_histogram": histogram | {"bins": Bins.of(pairs)}}
 
 
 def counted(config, runs, buckets):
     """The calculation's bucket rows, each of a run of the rule's targets with its timeouts in
-    its latency histogram at the run's limit (with_timeouts())."""
+    its latency histogram at the run's limit (with_timeouts()), in their order. The new rows are
+    made network by network (by the run's product), so a forked worker copies the pages of its
+    own networks only (parallel_measure.py, CALC-SCALE-1), as the rows read network by network."""
     found = limits(config, runs)
     if not found:
         return buckets
-    kept = []
-    for b in buckets:
-        if b["run_key"] in found and (b["counters"].get("errors") or {}).get(TIMEOUT):
-            b = b | {"counters": with_timeouts(b["counters"], found[b["run_key"]])}
-        kept.append(b)
+    product = {r["run_key"]: r.get("product_id") or 0 for r in runs}
+    changed = [
+        i
+        for i, b in enumerate(buckets)
+        if b["run_key"] in found and (b["counters"].get("errors") or {}).get(TIMEOUT)
+    ]
+    kept = list(buckets)
+    for i in sorted(changed, key=lambda i: (product[buckets[i]["run_key"]], i)):
+        b = buckets[i]
+        kept[i] = b | {"counters": with_timeouts(b["counters"], found[b["run_key"]])}
     return kept
