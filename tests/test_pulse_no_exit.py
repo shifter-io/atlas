@@ -89,13 +89,15 @@ async def test_a_country_answering_only_no_exit_opens_no_outage(database, tmp_pa
     ],
 )
 async def test_other_failures_stay_a_normal_down(database, tmp_path, network, answers):
+    """Two such pulses: the first waits, the second is 'down' (PULSE-NODE-DNS-2)."""
     seed(database)
-    (key,) = await stored(tmp_path, database, [answers])
+    keys = await stored(tmp_path, database, [answers] * 2)
     with connect(database) as conn:
         found = product(conn, network)
-        pulses(conn, found, [95] * 6 + [0], run_keys={6: key})
+        pulses(conn, found, [95] * 6 + [0, 0], run_keys=dict(zip((6, 7), keys, strict=True)))
     with connect(database) as conn:
-        assert judged(conn, 7) == ([(found, "down", None)], [(found, "DE", True)])
+        events = [(found, "pulse_finished", None), (found, "down", None)]
+        assert judged(conn, 8) == (events, [(found, "DE", True)])
 
 
 async def test_a_login_refusal_stays_proxy_auth_alert_s(database, tmp_path):
@@ -110,16 +112,18 @@ async def test_a_login_refusal_stays_proxy_auth_alert_s(database, tmp_path):
 
 
 async def test_a_network_answering_no_exit_everywhere_is_down(database, tmp_path):
-    """The network guard: Evomi answers 409 in all three countries it was pulsed in."""
+    """The network guard: Evomi answers 409 in all three countries it was pulsed in, at pulses 6
+    and 7: judged as any failure (the second is 'down')."""
     seed(database)
-    keys = await stored(tmp_path, database, [NO_EXIT] * 3)
+    keys = await stored(tmp_path, database, [NO_EXIT] * 6)
     with connect(database) as conn:
         evomi = product(conn, "evomi")
-        for country, key in zip(("DE", "FR", "PL"), keys, strict=True):
-            pulses(conn, evomi, [95] * 6 + [0], run_keys={6: key}, country=country)
+        for i, country in enumerate(("DE", "FR", "PL")):
+            runs = {6: keys[2 * i], 7: keys[2 * i + 1]}
+            pulses(conn, evomi, [95] * 6 + [0, 0], run_keys=runs, country=country)
     with connect(database) as conn:
-        events, outages = judged(conn, 7)
-        assert events == [(evomi, "down", None)] * 3
+        events, outages = judged(conn, 8)
+        assert events == [(evomi, "pulse_finished", None)] * 3 + [(evomi, "down", None)] * 3
         assert sorted(outages) == [(evomi, code, True) for code in ("DE", "FR", "PL")]
 
 
@@ -134,7 +138,9 @@ EVENTS = (
 async def test_the_guard_reads_only_the_pulses_finished_before(database, tmp_path, fast):
     """Evomi answers 409 in DE, FR and PL at pulses 6 and 7, and DE's pulses finish first. When
     DE's pulse 6 finished only DE had answered "no exit": hidden and recorded, as live detect
-    saw it; FR and PL see all three (the guard) and are down. At pulse 7 DE is down too."""
+    saw it; FR and PL see all three (the guard) and are judged, a first failure each. At pulse
+    7 all three are down: DE's hidden pulse got nothing either, so it confirms the failure
+    (PULSE-NODE-DNS-2)."""
     seed(database)
     keys = await stored(tmp_path, database, [NO_EXIT] * 6)
     with connect(database) as conn:
@@ -148,9 +154,11 @@ async def test_the_guard_reads_only_the_pulses_finished_before(database, tmp_pat
         found = [(c, (at - T0) // slot, kind, why) for c, at, kind, why in conn.execute(EVENTS)]
         assert found == [
             ("DE", 6, "pulse_finished", "no_exits"),
-            ("FR", 6, "down", None),
-            ("PL", 6, "down", None),
+            ("FR", 6, "pulse_finished", None),
+            ("PL", 6, "pulse_finished", None),
             ("DE", 7, "down", None),
+            ("FR", 7, "down", None),
+            ("PL", 7, "down", None),
         ]
         assert sorted(conn.execute(OUTAGES).fetchall()) == [
             (evomi, code, True) for code in ("DE", "FR", "PL")
@@ -158,8 +166,8 @@ async def test_the_guard_reads_only_the_pulses_finished_before(database, tmp_pat
 
 
 async def test_a_normally_big_country_stays_visible_for_two_hours(database, tmp_path):
-    """DE had 80 IPs yesterday: its first "no exit" pulse opens the outage as before, and only
-    the pulse two hours into the streak (pulse 10) is hidden and recorded."""
+    """DE had 80 IPs yesterday: its "no exit" pulses are judged as before (the second opens the
+    outage), and only the pulse two hours into the streak (pulse 10) is hidden and recorded."""
     seed(database)
     keys = await stored(tmp_path, database, [NO_EXIT] * 5)
     with connect(database) as conn:
@@ -168,14 +176,19 @@ async def test_a_normally_big_country_stays_visible_for_two_hours(database, tmp_
         pulses(conn, evomi, [95] * 6 + [0] * 5, run_keys=dict(zip(range(6, 11), keys, strict=True)))
     with connect(database) as conn:
         events, outages = judged(conn, 10)
-        assert events == [(evomi, "down", None), (evomi, "pulse_finished", "no_exits")]
+        assert events == [
+            (evomi, "pulse_finished", None),
+            (evomi, "down", None),
+            (evomi, "pulse_finished", "no_exits"),
+        ]
         assert outages == [(evomi, "DE", True)]  # an open outage is not touched
         slots = (
             "SELECT b.scheduled_for FROM test_events e JOIN test_batches b USING(batch_id) "
             "WHERE e.kind IN ('down','pulse_finished') ORDER BY e.event_id"
         )
         found = conn.execute(slots)
-        assert [row[0] - T0 for row in found] == [timedelta(hours=3), timedelta(hours=5)]
+        hours = [timedelta(hours=h) for h in (3, 3.5, 5)]
+        assert [row[0] - T0 for row in found] == hours
 
 
 REGIONS = ("CA", "DE", "GB", "NL", "US")  # tor1, fra1, lon1, ams3, nyc3

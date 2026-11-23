@@ -201,6 +201,33 @@ def _pulse_history(cur, cfg, batch, product, rule=False):
     ).fetchall()
 
 
+def _failed_before(cur, batch, product, rule=False):
+    """Whether the series' previous done pulse got no success (PULSE-NODE-DNS-2: it confirms a
+    'down'): the last one before this batch's slot that had finished by its finish, with a try
+    (no_exit_answers), not mostly refused at login (proxy_login) and, with the rule, of a time
+    its country counted. A pulse that answered only "no exit" (pulse_no_exit) is a failure here:
+    it got nothing either."""
+    gone = no_exit_answers.run_sql()
+    row = cur.execute(
+        "SELECT br.successes=0 AS failed FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "LEFT JOIN test_runs r ON r.run_key=br.run_key "
+        f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
+        "WHERE b.kind='pulse' AND b.country_code=%(country)s AND b.target_id=%(target)s "
+        f"AND br.product_id=%(product)s AND br.status='done' AND br.requests-{gone}>0 "
+        f"AND {proxy_login.MEASURED_SQL} AND b.scheduled_for<%(slot)s "
+        "AND b.finished_at<=%(finished)s ORDER BY b.scheduled_for DESC LIMIT 1",
+        {
+            "country": batch["country_code"],
+            "target": batch["target_id"],
+            "product": product,
+            "slot": batch["scheduled_for"],
+            "finished": batch["finished_at"],
+            **verdicts.params(rule),
+        },
+    ).fetchone()
+    return bool(row and row["failed"])
+
+
 def _pulse_incident(cur, batch, product, now):
     """The series' latest incident or recovery event, if any."""
     # The series state as of this batch: events of earlier batches only, so judging a batch

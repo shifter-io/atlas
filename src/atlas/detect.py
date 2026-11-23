@@ -12,7 +12,8 @@ the audits at their runs' finish; never after the detection. A row can so be old
 written before it: a client polls by event id (the site API's `after`), not by `at`. The batch's
 own finish time is in data.batch_finished_at.
 
-Outages (the `outages` table) are opened and closed with the helpers in outages.py. A pulse run
+Outages (the `outages` table) are opened and closed with the helpers in outages.py. A pulse
+without success writes 'down' (opens one) only after another (PULSE-NODE-DNS-2). A pulse run
 whose requests were mostly refused at login (proxy_login.py, PROXY-AUTH-ALERT-1) measured nothing
 and is never judged: no 'down', no success_drop, no recovery from it. Nor is one that got only
 the network's own "no exit" answers (pulse_no_exit.py, PULSE-NOEXIT-OUTAGE-1): the first of a
@@ -36,6 +37,7 @@ from .outages import (
     _batch_start,
     _close_outages,
     _exists,
+    _failed_before,
     _had,
     _open_outage,
     _pulse_history,
@@ -321,6 +323,9 @@ class Lookup:
     def incident(self, batch, product, now):
         return _pulse_incident(self.cur, batch, product, now)
 
+    def failed_before(self, batch, product):
+        return _failed_before(self.cur, batch, product, self.rule)
+
 
 def _pulse(lookup, cfg, batch, runs, emit):
     p50 = lookup.p50([r["run_key"] for r in runs if r["run_key"]])
@@ -355,7 +360,7 @@ def _pulse(lookup, cfg, batch, runs, emit):
 def _judge_pulse(lookup, cfg, batch, emit, p):
     """Write the events of one product's pulse, in a fixed order."""
     before = emit.count
-    handled = p.enough(cfg) and _judge_success(lookup.cur, cfg, batch, emit, p)
+    handled = p.enough(cfg) and _judge_success(lookup, cfg, batch, emit, p)
     through = p.requests >= cfg["min_requests"] and p.successes > 0
     # A 'down' ends with the first pulse that gets through, even below the baseline (a success
     # drop is judged afresh next time; PULSE-OUTAGE-CLOSE-1); a success_drop needs it back.
@@ -391,13 +396,15 @@ def _judge_pulse(lookup, cfg, batch, emit, p):
     _pulse_changed(cfg, batch, emit, p)
 
 
-def _judge_success(cur, cfg, batch, emit, p):
+def _judge_success(lookup, cfg, batch, emit, p):
     """A 'down' or 'success_drop' against the baseline; whether the pulse was one of them."""
     if p.base_rate is None:
         return False
     if p.successes == 0 and p.base_rate > cfg["down_baseline"]:
+        if p.open_kind != "down" and not lookup.failed_before(batch, p.product):
+            return False  # a first pulse without success waits for the series' next one
         # Each such pulse may open the outage: the slot's other target may have left it to this one.
-        since = _open_outage(cur, batch, p.product)
+        since = _open_outage(lookup.cur, batch, p.product)
         if p.open_kind != "down":
             emit(
                 "down",

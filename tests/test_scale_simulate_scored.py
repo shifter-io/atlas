@@ -127,6 +127,8 @@ def test_the_outage_plan_spreads_over_the_networks():
         elif outage.tier == "long":
             assert minutes >= 360 or len(outage.countries) >= 2
     assert [o.slots for o in plan].count(None) == 1
+    # detect opens an outage with its second down pulse (PULSE-NODE-DNS-2)
+    assert all(o.slots is None or o.slots >= model.DOWN == 2 for o in plan)
     assert model.collision(given, plan) is None  # no two networks with the same uptime
     day = [model.uptime(given, plan, n, 24) for n in NETWORKS if n != "net00"]
     assert sum(99.0 <= u <= 99.95 for u in day) > len(day) / 2

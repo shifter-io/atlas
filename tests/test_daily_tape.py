@@ -2,8 +2,8 @@
 against an isolated PostgreSQL.
 
 The fixture: half-hourly pulses in DE. alpha has a planned outage (three down pulses from slot
-8, healthy again from slot 11) and a success rate that moves each slot (pulse_finished); beta is
-steady, then down from slot 13 to the end (an outage still open).
+8, confirmed at 9, healthy again from slot 11) and a success rate that moves each slot
+(pulse_finished); beta is steady, then down from slot 13 to the end (an outage still open).
 """
 
 from __future__ import annotations
@@ -75,7 +75,8 @@ def test_the_tape_writes_the_planned_outage_once(database, capsys):
     events = query(database, EVENTS)
     down = [e for e in events if e[0] == "down" and e[1] == ids["alpha"]]
     recovered = [e for e in events if e[0] == "recovered"]
-    assert [(e[2], e[3]) for e in down] == [("DE", batch_at(database, ALPHA_DOWN[0]))]
+    # The second pulse without success confirms the outage (PULSE-NODE-DNS-2).
+    assert [(e[2], e[3]) for e in down] == [("DE", batch_at(database, ALPHA_DOWN[1]))]
     assert [(e[2], e[3]) for e in recovered] == [("DE", batch_at(database, ALPHA_DOWN[-1] + 1))]
     finished = dict(query(database, "SELECT batch_id,finished_at FROM test_batches"))
     started = dict(query(database, "SELECT batch_id,started_at FROM test_batches"))

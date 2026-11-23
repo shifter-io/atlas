@@ -18,7 +18,8 @@ from atlas.storage import connect, seed
 
 pytest_plugins = ["test_storage"]
 
-FAILED = 100  # the failing pulse: T0 + 50 hours, two days after the last healthy one (5)
+FAILED = 100  # the failing pulses: T0 + 50 hours (two days after the last healthy one, 5) and
+# the next one, which confirms the outage (PULSE-NODE-DNS-2)
 
 
 def _daily(conn, product_id, at, successes, country="DE"):
@@ -53,15 +54,15 @@ def _opened(conn):
 
 
 def _scenario(conn, dailies, *, interval=60):
-    """Healthy pulses 0 to 5, then none in the country until pulse FAILED gets nothing; the
-    daily tests in between, (hours after T0, successes); the outage detect opens."""
+    """Healthy pulses 0 to 5, then none in the country until pulses FAILED and FAILED + 1 get
+    nothing; the daily tests in between, (hours after T0, successes); the outage detect opens."""
     conn.execute("UPDATE targets SET pulse_interval_minutes=%s", (interval,))
     alpha = product(conn)
     pulses(conn, alpha, [95] * 6)
     for hours, successes in dailies:
         _daily(conn, alpha, T0 + timedelta(hours=hours), successes)
-    pulses(conn, alpha, [0], start=FAILED)
-    detect(conn, after(FAILED), config=SETTINGS)
+    pulses(conn, alpha, [0, 0], start=FAILED)
+    detect(conn, after(FAILED + 1), config=SETTINGS)
     return _opened(conn)
 
 
@@ -98,11 +99,11 @@ def test_a_failing_daily_test_after_the_gap_starts_the_outage(database):
 
 
 def test_a_failure_within_a_pulse_interval_still_starts_at_the_last_healthy_one(database):
-    """Normal outages do not change: the next slot's pulse fails, so the outage starts when the
+    """Normal outages do not change: the next slots' pulses fail, so the outage starts when the
     last healthy pulse finished (5 finished a minute after its start)."""
     seed(database)
     with connect(database) as conn:
         alpha = product(conn)
-        pulses(conn, alpha, [95] * 6 + [0])
-        detect(conn, after(6), config=SETTINGS)
+        pulses(conn, alpha, [95] * 6 + [0, 0])
+        detect(conn, after(7), config=SETTINGS)
         assert _opened(conn)[0] == [T0 + timedelta(minutes=30 * 5 + 1)]

@@ -51,14 +51,17 @@ def test_detect_drop_down_recovered_block_spike_and_pulse_changes(database):
         assert drop["data"]["region"] == "fra1" and drop["country_code"] == "DE"
         assert drop["target_id"] == "generic_http" and drop["region_id"] is not None
         pulses(conn, alpha, [0, 0, 96, 95], start=7)
-        assert detect(conn, after(10), config=SETTINGS) == 2
-        assert kinds(conn, drop["event_id"]) == [("down", -1), ("recovered", 1)]
+        assert detect(conn, after(10), config=SETTINGS) == 3
+        # The first pulse without success waits for the next one (PULSE-NODE-DNS-2).
+        down = [("pulse_finished", -1), ("down", -1), ("recovered", 1)]
+        assert kinds(conn, drop["event_id"]) == down
         recovered = conn.execute("SELECT data FROM test_events WHERE kind='recovered'").fetchone()[
             0
         ]
-        # Healthy again against the baseline the incident was judged by (which held the 70).
+        # Healthy again against the baseline the incident was judged by (which held the 70 and
+        # the first pulse without success).
         assert recovered["incident"] == "down"
-        assert recovered["baseline"] == pytest.approx((6 * 95 + 70) / 700)
+        assert recovered["baseline"] == pytest.approx((6 * 95 + 70 + 0) / 800)
         last = conn.execute("SELECT max(event_id) FROM test_events").fetchone()[0]
         pulses(
             conn,

@@ -94,14 +94,18 @@ def test_a_counting_country_is_judged_and_one_that_stops_counting_is_not(databas
 
 def test_a_baseline_holds_only_the_pulses_of_the_time_the_country_counted(database):
     """The pulses before the country counted had no success; counted from pulse 3, the series'
-    baseline is pulses 3 to 5 (95 %) and pulse 6 without a success is a 'down'."""
+    baseline is pulses 3 to 5 (95 %). Those pulses are no confirmation either: pulse 6 without
+    a success is a first failure, pulse 7 a 'down' (PULSE-NODE-DNS-2)."""
     seed(database)
     with connect(database) as conn:
         alpha = product(conn)
         for target in ("generic_http", "generic_https"):
-            pulses(conn, alpha, [0, 0, 0, 95, 95, 95, 0], target=target)
+            pulses(conn, alpha, [0, 0, 0, 95, 95, 95, 0, 0], target=target)
         verdict(conn, alpha, "DE", T0 + timedelta(minutes=80), 50)
-        detect(conn, after(6), config=dict(SETTINGS, min_baseline_batches=3))
+        config = dict(SETTINGS, min_baseline_batches=3)
+        detect(conn, after(6), config=config)
+        assert ("down", "generic_http") not in conn.execute(TAPE).fetchall()
+        detect(conn, after(7), config=config)
         assert ("down", "generic_http") in conn.execute(TAPE).fetchall()
         assert len(conn.execute(OUTAGES).fetchall()) == 1
 
@@ -113,19 +117,19 @@ async def test_the_fast_replay_gives_the_step_replays_tape_under_the_rule(
     ids = await stored(database, tmp_path)
     with connect(database) as conn:
         # Every network counts everywhere but beta in PL (no verdict: its outage never opens)
-        # and alpha in DE from slot 11 (FEW IPs: no 'recovered' at its comeback).
+        # and alpha in DE from slot 12 (FEW IPs: no 'recovered' at its comeback).
         for name, pid in ids.items():
             for country in COUNTRIES:
                 if (name, country) != ("beta", "PL"):
                     verdict(conn, pid, country, REPLAY_T0 - timedelta(hours=4), 40)
-        verdict(conn, ids["alpha"], "DE", REPLAY_T0 + timedelta(hours=11), FEW)
+        verdict(conn, ids["alpha"], "DE", REPLAY_T0 + timedelta(hours=12), FEW)
     fast, mixed = copy(databases, database), copy(databases, database)
     step = replayed(database, (REPLAY_T0, END, False))
     assert replayed(fast, (REPLAY_T0, END, True)) == step
     assert replayed(mixed, (REPLAY_T0, THIRD, False), (THIRD, END, True)) == step
     events, outages = step
     found = {(kind, product, country.strip()) for kind, _, product, country, *_ in events}
-    assert ("down", ids["alpha"], "DE") in found  # slot 10, before the FEW-IP verdict
+    assert ("down", ids["alpha"], "DE") in found  # slot 11, before the FEW-IP verdict
     assert ("recovered", ids["alpha"], "DE") not in found
     assert not any(product == ids["beta"] and country == "PL" for _, product, country in found)
     assert [row[1].strip() for row in outages if row[0] == ids["beta"]] == []

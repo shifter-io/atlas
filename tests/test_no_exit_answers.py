@@ -266,13 +266,15 @@ async def test_a_pulse_is_judged_on_its_other_answers(database, tmp_path, fast):
 
 
 async def test_a_404_page_of_the_target_side_stays_a_failure(database, tmp_path):
+    """Two such pulses: the first waits, the second is 'down' (PULSE-NODE-DNS-2)."""
     seed(database)
-    (key,) = await stored(tmp_path, database, [{"404": 100, "target_404": 100}])
+    keys = await stored(tmp_path, database, [{"404": 100, "target_404": 100}] * 2)
     with connect(database) as conn:
         alpha = product(conn)
-        pulses(conn, alpha, [95] * 6 + [0], run_keys={6: key})
+        pulses(conn, alpha, [95] * 6 + [0, 0], run_keys=dict(zip((6, 7), keys, strict=True)))
     with connect(database) as conn:
-        assert judged(conn, 7) == ([(alpha, "down", None)], [(alpha, "DE", True)])
+        events = [(alpha, "pulse_finished", None), (alpha, "down", None)]
+        assert judged(conn, 8) == (events, [(alpha, "DE", True)])
 
 
 async def test_the_cleanup_closes_an_outage_a_gateway_404_opened(database, db, tmp_path):

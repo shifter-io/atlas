@@ -14,7 +14,8 @@ state seeded once at the start and kept as each pulse is judged:
 - the open census outages (a healthy pulse closes them) and the (product, ASN) pairs reported.
 
 The rare writes stay detect's: an outage is opened and closed with outages.py's statements
-(opening reads the slot's other targets' runs). Each event is at its own
+(opening reads the slot's other targets' runs); so is the rare read whether a series' previous
+pulse got no success either (Lookup.failed_before, PULSE-NODE-DNS-2). Each event is at its own
 time, as detect writes it, never after the moment of the step its batch finished in plus
 settle_seconds (the step replay's detection), so a span begun by one replay and finished by
 the other matches a span done by either alone.
@@ -252,6 +253,7 @@ class Replay:
         self.cur = conn.cursor(row_factory=dict_row)
         self.emit = _Buffer(self.cur)
         self.memory = self.emit.memory
+        self.memory.rule = self.rule  # Lookup.failed_before's
         self.settle = timedelta(seconds=cfg["settle_seconds"])
         self._seed(since - TICK, until - TICK)
 
