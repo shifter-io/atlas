@@ -13,6 +13,7 @@ from ..browser.contracts import BROWSER_TARGETS, RUN_TARGETS
 from ..no_exit_answers import targets as no_exit_targets
 from .exclusions import spans as browser_exclusions
 from .outage_time import BASES
+from .timeout_latency import rule as timeout_latency
 
 KEYS = (
     "reliability",
@@ -160,6 +161,7 @@ KNOWN = {
     "browser_window_rule",
     "browser_exclusions",
     "no_exit_answers",
+    "timeouts_in_latency",
     "country_verdicts",
     "country_min_ips",
     "success_score",
@@ -219,6 +221,7 @@ def validate(config):
     standing_settings(config)
     browser_exclusions(config)
     no_exit_targets(config)
+    timeout_latency(config)
     value_basis(config)
     _counts(config.get("slots", {}), SLOTS, 1, "slot")
     _counts(config.get("payload", {}), PAYLOAD, 0, "payload")
