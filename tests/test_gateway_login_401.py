@@ -140,5 +140,6 @@ async def test_gateway_401_pulses_pause_the_network_and_open_no_outage(database,
     ((severity, acknowledged, data, message),) = query(database, PAUSES)
     assert (severity, acknowledged, data["reason"]) == ("major", False, "login refused")
     assert message.startswith(
-        "alpha: the account credentials no longer work (HTTP 401 or 407 on 200 of 200 requests"
+        "alpha: the account credentials no longer work, or the account is refused the IP-check "
+        "host (HTTP 401, 403 or 407 on 200 of 200 requests"
     )

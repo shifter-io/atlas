@@ -73,6 +73,7 @@ TABLE_KEYS = {
         "no_inventory_statuses",
         "echo_http",
         "echo_https",
+        "forbidden_host",
     },
 }
 # The top-level keys of a grammar: its tables and these.
@@ -139,6 +140,9 @@ class Grammar:
     # [testing] echo_http / echo_https: the network's own IP-check URLs by echo target id, run
     # instead of the built-in ones (targets.network_echo).
     echo_urls: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    # [testing] forbidden_host: (header, text) of the gateway's answer refusing our account the
+    # destination (proxy_login.forbidden_host); None when the network declares none.
+    forbidden_host: tuple[str, str] | None = None
 
     @classmethod
     def parse(cls, data: Mapping[str, Any]) -> Grammar:

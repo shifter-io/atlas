@@ -167,8 +167,10 @@ class Gateway:
         delay=0,
         fragmented=False,
         refusal=407,
+        headers="",
     ):
         self.scheme = scheme
+        self.headers = headers  # extra header lines ("Name: value\r\n") of every answer
         self.auth = auth
         self.refusal = refusal  # the status of a refused login (some gateways answer 401)
         self.body = body
@@ -212,7 +214,8 @@ class Gateway:
                 credentials = tuple(base64.b64decode(auth_line.split()[-1]).decode().split(":", 1))
                 self.credentials.append(credentials)
             if self.auth and not self.valid_auth(*credentials):
-                writer.write(f"HTTP/1.1 {self.refusal} Nope\r\nContent-Length: 0\r\n\r\n".encode())
+                refused = f"HTTP/1.1 {self.refusal} Nope\r\n{self.headers}Content-Length: 0\r\n\r\n"
+                writer.write(refused.encode())
                 await writer.drain()
                 return
             method, endpoint, _ = request.split(b"\r\n", 1)[0].split(b" ")
@@ -230,7 +233,7 @@ class Gateway:
 
     async def respond(self, writer):
         headers = (
-            f"HTTP/1.1 {self.status} Test\r\nContent-Length: {len(self.body)}\r\n"
+            f"HTTP/1.1 {self.status} Test\r\n{self.headers}Content-Length: {len(self.body)}\r\n"
             "Location: http://localhost/must-not-follow\r\nConnection: close\r\n\r\n"
         ).encode()
         writer.write(headers)

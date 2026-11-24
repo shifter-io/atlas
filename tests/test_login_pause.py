@@ -100,8 +100,9 @@ async def test_407_in_two_regions_pauses_the_three_parts_and_posts_once(database
     )
     assert data["paused"] == ["pulses", "daily", "browser"] and data["problems"] == []
     assert message == (
-        "alpha: the account credentials no longer work (HTTP 401 or 407 on 200 of 200 requests "
-        "since 12:00 UTC). Its tests are paused. Resume after a one-request login test passes."
+        "alpha: the account credentials no longer work, or the account is refused the IP-check "
+        "host (HTTP 401, 403 or 407 on 200 of 200 requests since 12:00 UTC). Its tests are paused. "
+        "Resume after a one-request login test passes."
     )
     assert query(database, TRIGGERS) == [(True,)]  # the pause stands for the trigger
 

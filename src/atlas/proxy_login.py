@@ -4,7 +4,8 @@ A request the gateway refused at login is the error proxy_auth: an HTTP 407 from
 401 from it (PROXY-AUTH-PAUSE-2: a CONNECT or a plain-HTTP echo request answered 401, as
 proxy-cheap did on 17 Nov 2026; a target's own 401 never counts), its 402 Payment Required
 (PAUSE-402-1: our account's balance or plan, as on 19 Nov 2026 when a gateway answered 402 to
-every request; the same places as a 401), or a SOCKS login refused without a status
+every request; the same places as a 401), its 403 refusing our account the IP-check host
+(WEBSHARE-ECHO-2: forbidden_host() below), or a SOCKS login refused without a status
 (transport.py, targets.py). When most of a run's answers are that, the network
 did not measure anything: our login or account failed, which is ours to fix, not its downtime
 (15 Nov 2026: ProxyEmpire refused our unchanged login and 75 network-wide and 108 per-country
@@ -27,7 +28,14 @@ instead of a refused login: the account needs money, not new credentials.
 
 from __future__ import annotations
 
+from typing import Any
+
 ERROR = "proxy_auth"
+# WEBSHARE-ECHO-2: a gateway answers this status, with the reason its grammar declares ([testing]
+# forbidden_host), when it refuses our account the destination: the IP-check host we measure
+# with, not the network's exits (24 Nov 2026: every pulse of a network failed in every country
+# at once and opened outages; the account still reached other destinations).
+FORBIDDEN_STATUS = 403
 MOSTLY = 0.5  # refused from this share of the requests
 MIN_REGIONS = 2  # a window is a login problem from this many refused regions
 # A run's refused requests (r: its test_runs row, br: its batch_runs row), for SQL that reads
@@ -59,3 +67,20 @@ def summary_refused(summary: dict) -> bool:
     """Whether a run's summary (errors, completed) was mostly refused at login."""
     errors = summary.get("errors") or {}
     return refused(errors.get(ERROR), summary.get("completed"))
+
+
+def forbidden_host(marker: tuple[str, str] | None, leg: str, status: int | None, headers) -> bool:
+    """Whether an answer is the gateway refusing our account the destination: FORBIDDEN_STATUS
+    from the gateway itself (its answer to our CONNECT, or to a plain-HTTP request, refusals.LEGS;
+    never one from inside a tunnel, the target's) with the network's `marker` (header name, text
+    in its value; both lower case). `headers` are (name, value) pairs, bytes or text, or a
+    mapping."""
+    if marker is None or status != FORBIDDEN_STATUS or leg not in ("connect", "plain"):
+        return False
+    name, text = marker
+    pairs: Any = headers.items() if hasattr(headers, "items") else headers or ()
+    return any(_text(key).lower() == name and text in _text(value).lower() for key, value in pairs)
+
+
+def _text(value: Any) -> str:
+    return value.decode("latin-1") if isinstance(value, (bytes, bytearray)) else str(value)

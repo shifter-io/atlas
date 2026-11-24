@@ -21,7 +21,7 @@ from aiohttp_socks import (
     ProxyType,
 )
 
-from . import bytes_io, node_dns, refusals
+from . import bytes_io, node_dns, proxy_login, refusals
 from .bytes_io import ByteCount, Exchange
 from .models import Outcome, ProxyConfig, RequestContext, RunConfig, protocol_of
 from .outcome import (
@@ -248,6 +248,8 @@ class HttpTransport:
                 counted = _failed_count(slot, tls and proxy.scheme == "http", answered)
             if session is not self.session:
                 await session.close()
+        if _host_forbidden(self.config.proxy, target, answer, status):
+            error, verdict = proxy_login.ERROR, Verdict.PROXY_ERROR  # ours, not the network's
         return Outcome(
             latency_ms=latency_ms,
             ip=exit_ip,
@@ -371,6 +373,16 @@ def _login_refused(target: Target, spec: RequestSpec, proxy: ProxyConfig, status
         and spec.url.startswith("http:")
         and isinstance(target, EchoIpTarget)
     )
+
+
+def _host_forbidden(source: Any, target: Target, answer: Any, status: int | None) -> bool:
+    """Whether an echo target's answer is the gateway refusing our account the IP-check host
+    (WEBSHARE-ECHO-2, proxy_login.forbidden_host): the network's grammar declares the answer
+    ([testing] forbidden_host); a run's proxy source without one never matches."""
+    if answer is None or not isinstance(target, EchoIpTarget):
+        return False
+    marker = getattr(source, "forbidden_host", None)
+    return proxy_login.forbidden_host(marker, answer[0], status, answer[1])
 
 
 def _classify(exc: Exception) -> tuple[str, str, int | None] | None:

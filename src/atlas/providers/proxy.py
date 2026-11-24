@@ -80,6 +80,12 @@ class GrammarProxy:
         """The network's own IP-check URLs by echo target id ([testing] echo_http, echo_https)."""
         return load_grammar(self.provider).echo_urls
 
+    @property
+    def forbidden_host(self) -> tuple[str, str] | None:
+        """The gateway's "destination forbidden for our account" answer ([testing]
+        forbidden_host: header name and text), or None."""
+        return load_grammar(self.provider).forbidden_host
+
     def __post_init__(self) -> None:
         g = load_grammar(self.provider)
         name = g.id.capitalize()

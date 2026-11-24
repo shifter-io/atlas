@@ -36,8 +36,9 @@ CLEAR_SQL = (
 )
 MESSAGE = (
     "{network}: {share:.0%} of its pulse requests in {count} regions ({regions}) were refused at "
-    "login (HTTP 401 or 407) since {since:%Y-%m-%d %H:%M} UTC. Our login or account, not the "
-    "network's downtime: no outage is published while it lasts. Check its credentials and account."
+    "login (HTTP 401 or 407), or our account was refused the IP-check host (HTTP 403), since "
+    "{since:%Y-%m-%d %H:%M} UTC. Our login or account, not the network's downtime: no outage is "
+    "published while it lasts. Check its credentials, account and IP-check host."
 )
 PAYMENT_MESSAGE = (
     "{network}: payment required. {share:.0%} of its pulse requests in {count} regions "
