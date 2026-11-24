@@ -44,6 +44,11 @@ max_concurrency = 2000 # CONC-1 probe 2026-10-24: highest step that passed, one 
 # 502 70.2% and 422 20.1% of requests in countries under 10 IPs, 0.8% and 0% in big ones
 no_inventory_statuses = [422, 502]
 # From 2026-11-19 14:00 UTC the gateway refuses connections from the test account to the default
-# IP-check host (client_connect_forbidden_host); other destinations work.
-echo_http = "http://checkip.amazonaws.com/"
-echo_https = "https://checkip.amazonaws.com/"
+# IP-check host (client_connect_forbidden_host), and from 2026-11-24 15:00 UTC to
+# checkip.amazonaws.com (client_connect_forbidden_host_account); other destinations work.
+# api.ipify.org answers one bare IPv4 address (no newline) over HTTP and HTTPS, without a redirect.
+echo_http = "http://api.ipify.org/"
+echo_https = "https://api.ipify.org/"
+# How the gateway refuses our account a destination: HTTP 403 with this reason. Such an answer is
+# ours to fix, not the network's failure (proxy_login.forbidden_host).
+forbidden_host = { header = "X-Webshare-Reason", contains = "forbidden_host" }

@@ -14,9 +14,9 @@ from atlas.targets import BrowserTarget, EchoIpTarget, network_echo, registry
 from atlas.transport import HttpTransport
 
 ROOT = Path(__file__).resolve().parents[1]
-CHECKIP = {
-    "generic_http": "http://checkip.amazonaws.com/",
-    "generic_https": "https://checkip.amazonaws.com/",
+ECHO = {
+    "generic_http": "http://api.ipify.org/",
+    "generic_https": "https://api.ipify.org/",
 }
 
 
@@ -34,10 +34,10 @@ def grammar_data(**testing):
     return data | ({"testing": testing} if testing else {})
 
 
-def test_webshare_sets_checkip_and_every_other_network_sets_none():
-    assert dict(load_grammar("webshare").echo_urls) == CHECKIP
+def test_webshare_sets_its_echo_urls_and_every_other_network_sets_none():
+    assert dict(load_grammar("webshare").echo_urls) == ECHO
     proxy = GrammarProxy("webshare", "fixture1", "secret", parameters={"country": "us"})
-    assert dict(proxy.echo_urls) == CHECKIP
+    assert dict(proxy.echo_urls) == ECHO
     # The run config the network publishes is unchanged: the URL shows in target.url only.
     assert "echo_urls" not in proxy.public()
     assert "echo_urls" not in RunConfig("generic_http", proxy).public()
@@ -64,11 +64,11 @@ def test_grammar_echo_url_validation():
 
 
 def test_network_echo_moves_only_built_in_echo_targets_at_their_built_in_url():
-    network = echo_network(ProxyConfig("http", "127.0.0.1", 8080), CHECKIP)
-    for target_id in CHECKIP:
+    network = echo_network(ProxyConfig("http", "127.0.0.1", 8080), ECHO)
+    for target_id in ECHO:
         built_in = registry.get(target_id)
         moved = network_echo(built_in, network)
-        assert moved == EchoIpTarget(target_id, CHECKIP[target_id])
+        assert moved == EchoIpTarget(target_id, ECHO[target_id])
         assert (moved.id, moved.version, moved.pool_eligible) == (
             built_in.id,
             built_in.version,
@@ -85,8 +85,11 @@ def test_network_echo_moves_only_built_in_echo_targets_at_their_built_in_url():
     assert network_echo(page, network) is page
 
 
-def test_the_checkip_answer_passes():
-    target = EchoIpTarget("generic_http", CHECKIP["generic_http"])
+def test_the_echo_answers_pass():
+    target = EchoIpTarget("generic_http", ECHO["generic_http"])
+    # api.ipify.org: one bare IPv4 address, no newline (WEBSHARE-ECHO-2).
+    assert target.assess(200, b"203.0.113.8").ip == "203.0.113.8"
+    # checkip.amazonaws.com and icanhazip.com: the address and a newline.
     assessed = target.assess(200, b"203.0.113.8\n")
     assert (assessed.ip, assessed.error) == ("203.0.113.8", None)
     assert target.assess(200, b"2001:db8::8\n").ip == "2001:db8::8"
@@ -107,7 +110,7 @@ async def test_plain_http_runs_at_the_network_url(tmp_path, processes, given):
     # `given` is how a daily manifest names the built-in URL; a pulse passes none.
     result, requests = await plain_run(
         tmp_path,
-        lambda proxy: echo_network(proxy, CHECKIP),
+        lambda proxy: echo_network(proxy, ECHO),
         requests=4,
         concurrency=2,
         processes=processes,
@@ -115,9 +118,9 @@ async def test_plain_http_runs_at_the_network_url(tmp_path, processes, given):
     )
     assert result.successes == 4
     assert result.target["id"] == "generic_http"
-    assert result.target["url"] == CHECKIP["generic_http"]
+    assert result.target["url"] == ECHO["generic_http"]
     assert len(requests) == 4
-    assert all(r.startswith(b"GET http://checkip.amazonaws.com/ HTTP/1.1") for r in requests)
+    assert all(r.startswith(b"GET http://api.ipify.org/ HTTP/1.1") for r in requests)
 
 
 async def test_networks_without_echo_urls_run_as_before(tmp_path):
@@ -138,7 +141,7 @@ async def test_networks_without_echo_urls_run_as_before(tmp_path):
 async def test_a_url_given_with_the_run_is_kept(tmp_path):
     result, requests = await plain_run(
         tmp_path,
-        lambda proxy: echo_network(proxy, CHECKIP),
+        lambda proxy: echo_network(proxy, ECHO),
         requests=2,
         target_url="http://echo.example.test/ip",
     )

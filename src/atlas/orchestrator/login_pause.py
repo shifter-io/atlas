@@ -5,8 +5,8 @@ paused yet, with netpause.pause (its pulses, daily tests and browser entry), and
 message per pause: the major alert network_paused, a new row each time, which the server alerts
 post to Slack (scripts/server-alerts.sh check_alerts). That open alert is the network's pause:
 its data hold the reason, the time and what was moved; while it is open later triggers post
-nothing. The triggers (proxy_login.MOSTLY of the requests refused at login, HTTP 401 or 407,
-or for payment, HTTP 402):
+nothing. The triggers (proxy_login.MOSTLY of the requests refused at login, HTTP 401 or 407, by a
+gateway's 403 refusing our account the IP-check host, WEBSHARE-ECHO-2, or for payment, HTTP 402):
 
 - an open proxy_login_refused alert: the pulse evaluator's (at least 2 regions refused,
   pulse_login.py) or the daily import's (a network's daily test of an hour, daily_refused);
@@ -44,9 +44,9 @@ REASON = "login refused"
 PAYMENT_REASON = "payment required"
 BROWSER_WINDOW = timedelta(hours=1)
 MESSAGE = (
-    "{network}: the account credentials no longer work (HTTP 401 or 407 on {refused} of "
-    "{requests} requests since {since:%H:%M} UTC). Its tests are paused. Resume after a "
-    "one-request login test passes."
+    "{network}: the account credentials no longer work, or the account is refused the IP-check "
+    "host (HTTP 401, 403 or 407 on {refused} of {requests} requests since {since:%H:%M} UTC). "
+    "Its tests are paused. Resume after a one-request login test passes."
 )
 PAYMENT_MESSAGE = (
     "{network}: payment required. The gateway refuses our account for payment (HTTP 402 on "
@@ -159,7 +159,7 @@ async def daily_refused(db: Database, network: dict, counts: dict, since) -> Non
             return
         product = row["product_id"]
         paid = proxy_login.payment(counts["payment"], counts["refused"])
-        how = "for payment (HTTP 402)" if paid else "at login (HTTP 401 or 407)"
+        how = "for payment (HTTP 402)" if paid else "at login or for the IP-check host"
         message = (
             f"{network['provider']}: {counts['refused']} of {counts['requests']} daily test "
             f"requests of the hour {since:%Y-%m-%d %H}:00 UTC were refused {how}."

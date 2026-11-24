@@ -18,6 +18,10 @@ from ..models_validate import normalized_target_url
 
 # [testing] keys naming the network's own IP-check URL, and the echo target each one serves.
 ECHO_KEYS = {"echo_http": "generic_http", "echo_https": "generic_https"}
+# [testing] forbidden_host's keys: the gateway's answer header and the text in its value that
+# says the gateway refuses our account the destination (proxy_login.forbidden_host).
+FORBIDDEN_KEYS = ("header", "contains")
+HEADER_NAME = re.compile(r"[A-Za-z0-9-]+")
 KINDS = ("country", "name", "integer", "boolean", "choice", "token", "session")
 MAX_CONCURRENCY = 5000  # the campaign spec's own concurrency bound
 
@@ -176,9 +180,25 @@ def _echo_urls(testing: Mapping[str, Any]) -> Mapping[str, str]:
     return MappingProxyType(urls)
 
 
+def _forbidden_host(testing: Mapping[str, Any]) -> tuple[str, str] | None:
+    """[testing] forbidden_host = { header = "...", contains = "..." } as (header name, text),
+    both lower-cased; None when unset."""
+    value = testing.get("forbidden_host")
+    if value is None:
+        return None
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != set(FORBIDDEN_KEYS)
+        or not all(isinstance(value[key], str) and value[key].strip() for key in FORBIDDEN_KEYS)
+        or not HEADER_NAME.fullmatch(value["header"])
+    ):
+        raise ValueError("Grammar forbidden_host must name a header and the text it contains")
+    return value["header"].lower(), value["contains"].strip().lower()
+
+
 def _testing(testing: Mapping[str, Any]) -> dict[str, Any]:
-    """The Grammar fields of the [testing] table: protocol, concurrency, answer classes and the
-    network's own IP-check URLs."""
+    """The Grammar fields of the [testing] table: protocol, concurrency, answer classes, the
+    network's own IP-check URLs and its "forbidden destination" answer."""
     protocol = testing.get("protocol", "default")
     if protocol not in NETWORK_PROTOCOLS:
         raise ValueError("Unknown grammar test protocol")
@@ -201,4 +221,5 @@ def _testing(testing: Mapping[str, Any]) -> dict[str, Any]:
         "rate_limit_connect": connect,
         "no_inventory_statuses": empty,
         "echo_urls": _echo_urls(testing),
+        "forbidden_host": _forbidden_host(testing),
     }
