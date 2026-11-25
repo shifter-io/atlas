@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from atlas.calculated import standing
+from atlas.calculated import standing, standing_shift
 from atlas.calculated.policy import STANDING, standing_settings
 
 AS_OF = datetime(2026, 11, 19, 18, tzinfo=UTC)
@@ -84,6 +84,7 @@ def test_one_missed_hour_does_not_freeze_three_hours_do():
             "last_measured": AS_OF - 3 * HOUR,
             "frozen_since": AS_OF,
             "values_from": AS_OF - 5 * HOUR,
+            "bests": {},  # no peers given: test_bests_are_the_apis_shift_groups()
         }
     assert stopped[0]["days"] == ["frozen day"]
 
@@ -244,3 +245,114 @@ def test_a_stop_longer_than_the_window_is_not_lifted_on_its_first_hour_back():
     again[0]["windows"]["24h"]["_hours"] = standing.hours(one + day[1:2], AS_OF)
     standing.mark(again, {stopped["id"]: {"held": stopped, "measured": None}}, AS_OF, CONFIG)
     assert again[0]["windows"]["24h"]["standing"]["status"] == standing.STOPPED
+
+
+def peer(browser, challenge, http, status=standing.MEASURED):
+    """A stored peer network of one build with a 24h window: its browser overall and browser
+    target score, its challenge overall and its HTTP target's success, challenge and block."""
+    scores = {m: {"score": http} for m in ("success", "challenge", "block")}
+    engine = {"scores": {"success": {"score": browser}}}
+    w = {
+        "standing": {"status": status},
+        "browser_overall": {"camoufox": {"success": {"score": browser}}},
+        "challenge_overall": {"score": challenge},
+        "targets": {
+            "generic_http": {"scores": scores},
+            "x_web": {"browser": {"engine": "camoufox", "engines": {"camoufox": engine}}},
+        },
+    }
+    return {"id": "p", "kind": "residential", "windows": {"24h": w}}
+
+
+def test_bests_are_the_apis_shift_groups():
+    """A new freeze keeps the source build's best of each group the API's success shift scales
+    by (success_shift.go window()): browser overalls by engine, the challenge overall, and each
+    target's success, challenge and block by engine (an HTTP target's "http"), over the measured
+    windows of the kind; a held peer counts for none."""
+
+    peers = [peer(6.5, 4, 3), peer(7.25, None, 5), peer(9.9, 9.9, 9.9, standing.FROZEN)]
+    assert standing.bests(peers, "24h") == {
+        "browser|camoufox": 7.25,
+        "challenge_overall": 4,
+        "target|generic_http|http|success": 5,
+        "target|generic_http|http|challenge": 5,
+        "target|generic_http|http|block": 5,
+        "target|x_web|camoufox|success": 7.25,
+    }
+    source = {"held": None, "measured": {"as_of": AS_OF - 5 * HOUR, "entry": stored()}}
+    source["measured"]["peers"] = peers
+    networks = [entry(AS_OF - 4 * HOUR)]
+    standing.mark(networks, {networks[0]["id"]: source}, AS_OF, CONFIG)
+    assert networks[0]["windows"]["24h"]["standing"]["bests"]["browser|camoufox"] == 7.25
+
+
+def test_shifted_overalls_rank_on_the_values_the_api_serves():
+    """A frozen browser overall of 4.5 published as 9.5 (its group's best was 5) against measured
+    9.8 and 4.6, which the API serves as 10 and 4.8: it ranks between them, so a lower rank never
+    serves a higher score; the challenge overall the same. The Success x/10 (shifted by the
+    calculation) ranks on its own scores."""
+
+    def net(network, score, frozen=False):
+        own = {"score": score, "rank": 1 if frozen else None, "ranked_of": 2}
+        w = {"browser_overall": {"camoufox": {"success": dict(own)}}}
+        w["challenge_overall"] = dict(own)
+        w["standing"] = {"status": standing.FROZEN if frozen else standing.MEASURED}
+        if frozen:
+            w["standing"]["bests"] = {"browser|camoufox": 5, "challenge_overall": 5}
+        return {"id": network, "kind": "isp", "windows": {"24h": w}}
+
+    networks = [net("a", 9.8), net("b", 4.6), net("f", 4.5, frozen=True)]
+    standing.rerank(networks)
+    browser = [n["windows"]["24h"]["browser_overall"]["camoufox"]["success"] for n in networks]
+    challenge = [n["windows"]["24h"]["challenge_overall"] for n in networks]
+    for scores in (browser, challenge):
+        ranks = [s["rank"] for s in scores]
+        assert ranks == [1, 3, 2]  # served 10, 4.8 and 9.5
+
+
+class Cursor:
+    """A cursor whose every statement returns rows (one value each); it records the params."""
+
+    def __init__(self, rows):
+        self.rows, self.params = rows, []
+
+    def execute(self, _query, params):
+        self.params.append(params)
+        return iter([(row,) for row in self.rows])
+
+
+def test_a_window_frozen_without_bests_gains_them_once():
+    """A window frozen before the group bests were kept gains them from the newest published
+    build at or before the cutoff its values are from, read once: carried with its standing,
+    a window that has them reads no build again; with no such build kept it has none."""
+    held = stored(standing.FROZEN, "2026-11-19T14:00:00+00:00") | {"kind": "residential"}
+    builds = [(3, AS_OF), (2, datetime(2026, 11, 19, 13, tzinfo=UTC)), (1, AS_OF - 9 * HOUR)]
+    cursor = Cursor([peer(6.5, 4, 3), peer(9.9, 9.9, 9.9, standing.FROZEN)])
+    found = standing._refill(cursor, builds, held)
+    assert found["24h"] == {"browser|camoufox": 6.5, "challenge_overall": 4} | {
+        f"target|generic_http|http|{m}": 3 for m in ("success", "challenge", "block")
+    } | {"target|x_web|camoufox|success": 6.5}
+    assert found["30d"] == {}  # the peers have no 30d window
+    assert [params[0] for params in cursor.params] == [2, 2]
+    assert standing._refill(cursor, builds[:1], held) == {"24h": {}, "30d": {}}
+    networks = [entry(AS_OF - 4 * HOUR)]
+    source = {"held": held, "measured": None, "bests": found}
+    standing.mark(networks, {networks[0]["id"]: source}, AS_OF, CONFIG)
+    w = networks[0]["windows"]["24h"]
+    assert w["standing"]["bests"] == found["24h"] and w["_held"] is held["windows"]["24h"]
+    for w in held["windows"].values():
+        w["standing"]["bests"] = {"challenge_overall": 4}
+    assert standing._refill(cursor, builds, held) == {}
+
+
+def test_only_the_browser_and_challenge_overalls_rank_shifted():
+    """The Index Score and the Success x/10 rank on their own scores; a frozen browser overall
+    without a stored best for its engine serves (and ranks on) its stored score."""
+    assert standing_shift.group("challenge_overall") == "challenge_overall"
+    assert standing_shift.group("browser:camoufox") == "browser|camoufox"
+    assert standing_shift.group("balanced") is standing_shift.group("success_overall") is None
+    live, frozen = [{"score": 8.0}, {"score": 6.0}], {"score": 5.0}
+    values = standing_shift.served("success_overall", live, [(frozen, {})])
+    assert sorted(values.values()) == [5.0, 6.0, 8.0]
+    values = standing_shift.served("browser:camoufox", live, [(frozen, {"browser|chrome": 6})])
+    assert [values[id(s)] for s in (*live, frozen)] == [10.0, 8.0, 5.0]

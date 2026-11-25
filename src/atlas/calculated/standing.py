@@ -20,16 +20,18 @@ build at or before the cutoff in which the network was still measured (sources()
 operation the previous build, the last values published before the freeze began.
 
 A held window is in no measured peer set: no target rank, Success x/10 (its best rate), overall,
-Index Score peer, latency basket penalty, day or point score of a measured network counts its
-rows. Its own ranks are held (rerank()): each headline ranking (the Index Score's and the
-success, challenge and browser overalls') ranks the measured networks with every frozen network's
-last score; a measured network that beats it passes it, and it never ranks above its rank at the
-stop. A held window lifts once the network is measured again and lift_coverage of the window's
-hours since the earlier of its first request there and the stop hold one of its network requests
-(hours(), _covered()), so a network measured again for one hour does not rank on that hour, even
-after a stop longer than the window, and a young network is not held for a window it never
-filled. Every window carries `standing`: its status (STATUSES), the network's
-last measurement, when the freeze began and the cutoff its values are from.
+Index Score peer, latency basket penalty, day or point score of a measured network counts its rows.
+Its own ranks are held (rerank()): each headline ranking (the Index Score's and the success,
+challenge and browser overalls') ranks the measured networks with every frozen network's last score;
+a measured network that beats it passes it, and it never ranks above its rank at the stop; the
+browser and challenge overalls rank on the values the API serves, and a frozen window keeps the
+API's group bests of the build its values are from (standing_shift.py). A held window lifts once the
+network is measured again and lift_coverage of the window's hours since the earlier of its first
+request there and the stop hold one of its network requests (hours(), _covered()), so a network
+measured again for one hour does not rank on that hour, even after a stop longer than the window,
+and a young network is not held for a window it never filled. Every window carries `standing`: its
+status (STATUSES), the network's last measurement, when the freeze began and the cutoff its values
+are from.
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ from datetime import datetime, timedelta
 
 from psycopg.rows import tuple_row
 
+from . import standing_shift as shift
 from .policy import standing_settings
 
 MEASURED, FROZEN, STOPPED = "measured", "frozen", "stopped"
@@ -109,19 +112,47 @@ def sources(conn, as_of, config):
             for w in entry["windows"].values()
         ):
             source["measured"] = _measured(cursor, builds, network, limit)
+        if source["held"]:
+            source["bests"] = _refill(cursor, builds, entry)
         out[network] = source
     return out
 
 
 def _measured(cursor, builds, network, limit):
-    """{"as_of", "entry"} of the newest of builds in which network's newest request was less
-    than limit before its cutoff, or None."""
+    """{"as_of", "entry", "peers"} of the newest of builds in which network's newest request was
+    less than limit before its cutoff (peers: that build's networks of its kind), or None."""
     for build_id, built in builds:
         row = cursor.execute(ENTRY, (build_id, network)).fetchone()
         last = row and last_measured(row[0])
         if last is not None and built - last < limit:
-            return {"as_of": built, "entry": row[0]}
+            peers = shift.peers(cursor, build_id, row[0]["kind"])
+            return {"as_of": built, "entry": row[0], "peers": peers}
     return None
+
+
+def _refill(cursor, builds, entry):
+    """{label: its group bests (shift.bests())} of a held entry's frozen windows stored without
+    them (frozen before they were kept), from the newest of builds at or before the cutoff their
+    values are from (normally that build; {} when none is kept), so they are read once."""
+    out = {}
+    for label, w in entry["windows"].items():
+        own = w.get("standing") or {}
+        if own.get("status") != FROZEN or "bests" in own:
+            continue
+        since = own.get("values_from") and _time(own["values_from"])
+        build = next((b for b, built in builds if since and built <= since), None)
+        found = build is not None and shift.peers(cursor, build, entry["kind"])
+        out[label] = bests(found, label) if found else {}
+    return out
+
+
+def bests(peers, label):
+    """shift.bests() of the measured windows label of peers (one build's networks of one kind):
+    the group bests a window frozen from that build keeps."""
+    windows = [p["windows"].get(label) for p in peers]
+    return shift.bests(
+        [w for w in windows if w and (w.get("standing") or {}).get("status") not in HELD]
+    )
 
 
 def hours(rows, end):
@@ -164,7 +195,10 @@ def _kept(source, label, stopped, cover, as_of):
     status = ((before or {}).get("standing") or {}).get("status")
     if status in HELD and (stopped or not _covered(cover, before, as_of)):
         window = before if status == FROZEN else None
-        return window, dict(before["standing"]), source["held"].get("days", [])
+        own = dict(before["standing"])
+        if status == FROZEN and "bests" not in own:
+            own["bests"] = source.get("bests", {}).get(label, {})
+        return window, own, source["held"].get("days", [])
     if not stopped:
         return None
     measured = source["measured"]
@@ -172,7 +206,9 @@ def _kept(source, label, stopped, cover, as_of):
     if not window:
         return None, _label(STOPPED, None, as_of), []
     values_from = _time(measured["as_of"])
-    return window, _label(FROZEN, None, as_of, values_from), measured["entry"].get("days", [])
+    found = bests(measured.get("peers", ()), label)
+    own = _label(FROZEN, None, as_of, values_from) | {"bests": found}
+    return window, own, measured["entry"].get("days", [])
 
 
 def _covered(cover, held, as_of):
@@ -237,20 +273,25 @@ def hold(networks, previous):
 def rerank(networks):
     """Rank every headline score of each kind and window over the measured and frozen windows
     (place()): the Index Score by its rule (window_scoring.rank(): ties share the best rank), the
-    overalls by theirs (ties share the average rank, with ranked_of)."""
+    overalls by theirs (ties share the average rank, with ranked_of). The browser and challenge
+    overalls rank on the values the API serves (served()), so a rank and its served score always
+    agree (standing_shift.py)."""
     peers = {}
     for entry in networks:
         for label, w in entry["windows"].items():
-            frozen = (w.get("standing") or {}).get("status") == FROZEN
+            own = w.get("standing") or {}
+            frozen = own.get("status") == FROZEN
             for key, score in _headline(w):
-                peers.setdefault((entry["kind"], label, key), []).append((score, frozen))
+                member = (score, frozen, own.get("bests") or {})
+                peers.setdefault((entry["kind"], label, key), []).append(member)
     for (_, _, key), members in peers.items():
-        if not any(frozen for _, frozen in members):
+        if not any(frozen for _, frozen, _ in members):
             continue
         balanced = key == "balanced"
-        live = [s for s, frozen in members if not frozen and _eligible(s, balanced)]
-        kept = [(s, s["rank"]) for s, frozen in members if frozen and s.get("rank") is not None]
-        place(live, kept, average=not balanced)
+        live = [s for s, frozen, _ in members if not frozen and _eligible(s, balanced)]
+        held = [(s, b) for s, frozen, b in members if frozen and s.get("rank") is not None]
+        value = shift.served(key, live, held)
+        place(live, [(s, s["rank"]) for s, _ in held], not balanced, value)
 
 
 def _headline(window):
@@ -273,22 +314,24 @@ def _eligible(score, balanced):
     return score.get("state") in ("ready", "retained") if balanced else True
 
 
-def place(live, kept, average):
+def place(live, kept, average, value=None):
     """Rank live (score objects with a score) and kept ((score object, its rank at the stop)) in
-    place: live by score, highest first; each kept one inserted after every score above its own
-    and never above its rank at the stop. Adjacent equal scores share the best (average: the mean)
-    of their places; a kept one never ranks better than its rank at the stop. average also sets
-    ranked_of. Fewer than two (Index Score) or none (overall) change no rank."""
-    order = sorted(live, key=lambda s: -s["score"])
+    place by value ({id(score object): value}, served(); default: their scores): live highest
+    first; each kept one inserted after every value above its own and never above its rank at
+    the stop. Adjacent equal values share the best (average: the mean) of their places; a kept
+    one never ranks better than its rank at the stop. average also sets ranked_of. Fewer than two
+    (Index Score) or none (overall) change no rank."""
+    value = value or {}
+    of = {id(s): value.get(id(s), s["score"]) for s in [*live, *(s for s, _ in kept)]}
+    order = sorted(live, key=lambda s: -of[id(s)])
     floors = {}
     for score, at in sorted(kept, key=lambda k: k[1]):
-        above = sum(other["score"] > score["score"] for other in order)
+        above = sum(of[id(other)] > of[id(score)] for other in order)
         order.insert(min(max(int(at) - 1, above), len(order)), score)
         floors[id(score)] = at
     if len(order) < (1 if average else 2):
         return
-    values = [s["score"] for s in order]
-    ranks = _adjacent(values, average)
+    ranks = _adjacent([of[id(s)] for s in order], average)
     for s, rank in zip(order, ranks, strict=True):
         s["rank"] = max(rank, floors.get(id(s), rank))
         if average:

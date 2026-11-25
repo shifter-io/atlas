@@ -390,6 +390,10 @@ type WindowStanding struct {
 	LastMeasured *string `json:"last_measured"`
 	FrozenSince  *string `json:"frozen_since"`
 	ValuesFrom   *string `json:"values_from"`
+	// Bests is a frozen window's success shift group bests of the build its
+	// values are from (calculated/standing.py bests()), keyed without kind
+	// and range; nil before them and on a stopped window.
+	Bests map[string]Num `json:"bests"`
 }
 
 // Held is whether the window's standing is held (frozen or stopped).
