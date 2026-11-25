@@ -33,6 +33,12 @@ twice its IPs) per connection, at most the 60-minute country cap. That is about 
 rule needed in the daily tests of 1 to 15 Nov (none of their 4,755 unique-ratio runs would have
 reached it), so it ends only a test that hangs, while a cell stays bounded with the round's
 soft limit (onboarding.rounds.SOFT_LIMIT).
+
+DAILY-PACE-1: a country its network's grammar gives a ceiling (`[testing]
+country_max_concurrency`) starts at most at it and records it as its pace's `ceiling`, the most
+its run grows to (RunConfig.grow_ceiling), for a gateway that refuses above a request-rate limit
+of the network's plan. The run's concurrency, and so its scope, stays the network's; a country
+without a ceiling, or with one at or above that concurrency, keeps its pace as before.
 """
 
 from __future__ import annotations
@@ -47,6 +53,7 @@ from psycopg.rows import tuple_row
 from ..availability import census_peaks
 from ..models import RunConfig
 from ..onboarding.scheduler import COUNTRY_CAP_SECONDS
+from ..providers.grammar import load_grammar
 from ..runner import LOW_IPS, PACE_SHARE
 
 SHARE = PACE_SHARE  # the same share the run grows by (runner.PACE_SHARE)
@@ -104,13 +111,17 @@ def budget(requests: int, concurrency: int) -> dict:
 
 
 def country_pace(network: str, due: dict, history: History, cap: int) -> dict:
-    """{country: pace} of the network's countries due this hour (its {region: [codes]})."""
+    """{country: pace} of the network's countries due this hour (its {region: [codes]}), each
+    under its grammar ceiling, if any (DAILY-PACE-1)."""
     latest, census = history.latest.get(network, {}), history.census.get(network, {})
-    return {
-        country: start(latest.get(country), census.get(country), cap)
-        for countries in due.values()
-        for country in countries
-    }
+    ceilings = load_grammar(network).country_max_concurrency
+    paced = {}
+    for country in (country for countries in due.values() for country in countries):
+        most = min(cap, ceilings.get(country, cap))
+        paced[country] = start(latest.get(country), census.get(country), most)
+        if most < cap:
+            paced[country]["ceiling"] = most
+    return paced
 
 
 def history(formulas: Path, database_file: Path | None, as_of: datetime) -> History:

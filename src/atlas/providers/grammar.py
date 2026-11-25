@@ -68,6 +68,7 @@ TABLE_KEYS = {
     "testing": {
         "protocol",
         "max_concurrency",
+        "country_max_concurrency",
         "rate_limit_statuses",
         "rate_limit_connect",
         "no_inventory_statuses",
@@ -131,6 +132,10 @@ class Grammar:
     # [testing] max_concurrency: the highest in-flight request count the network sustained
     # from one worker (`campaign probe`); campaign plans cap their concurrency at it.
     max_concurrency: int | None = None
+    # [testing] country_max_concurrency: {country: n}, the most requests that country's daily
+    # test holds in flight (daily.pace), for a gateway that refuses above a request-rate limit;
+    # the run's concurrency, and so its scope, stays the network's.
+    country_max_concurrency: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
     # [testing] answer classes (answer_classes() below; 429 is implicit on every network):
     # the network's own rate-limit statuses, whether gateway connection refusals signal its rate
     # limit, and the statuses it sends when it has no exits in the requested country.

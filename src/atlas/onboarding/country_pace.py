@@ -1,11 +1,12 @@
 """The optional `country_pace` key of a daily test's manifest (LOWAVAIL-1 step 3, daily.pace).
 
 {country: {"concurrency": n[, "requests": m][, "low_requests": r, "low_seconds": s][, "seconds":
-b]}}: a country's requests at once (its run's start_concurrency, never above the manifest's own
-concurrency, which stays the run's and its scope's), for a probe its request limit, for a
-low-availability country its cap while it finds few IPs (RunConfig.low_*; such a country runs
-beside the cell's other low ones, onboarding.rounds), and its time budget (its run's
-cap_seconds, LOWAVAIL-PACE-3). The round runs its other countries smallest pace first
+b][, "ceiling": c]}}: a country's requests at once (its run's start_concurrency, never above the
+manifest's own concurrency, which stays the run's and its scope's), for a probe its request
+limit, for a low-availability country its cap while it finds few IPs (RunConfig.low_*; such a
+country runs beside the cell's other low ones, onboarding.rounds), its time budget (its run's
+cap_seconds, LOWAVAIL-PACE-3), and under a grammar ceiling its `ceiling`, the most its run grows
+to (RunConfig.grow_ceiling, DAILY-PACE-1). The round runs its other countries smallest pace first
 (smallest_first, DAILY-ORDER-1). Only an ephemeral (version 3) manifest with
 `due_countries` has it, and only for countries due. A country without an entry runs at the
 manifest's settings, as before.
@@ -17,7 +18,7 @@ KEY = "country_pace"
 # A round's low-availability countries running at once (each stops within its low cap: about
 # daily.pace.LOW_SECONDS plus one request's timeout), so a dozen of them take about a minute.
 LOW_PARALLEL = 12
-FIELDS = ("concurrency", "requests", "low_requests", "low_seconds", "seconds")
+FIELDS = ("concurrency", "requests", "low_requests", "low_seconds", "seconds", "ceiling")
 
 
 def put(manifest: dict, pace: dict | None) -> None:
@@ -41,12 +42,16 @@ def validate(data: dict) -> None:
         if country not in countries or not isinstance(entry, dict) or "concurrency" not in entry:
             raise ValueError("country_pace must give a due country its concurrency")
         if set(entry) - set(FIELDS):
-            raise ValueError("country_pace allows only concurrency, requests, low_* and seconds")
+            raise ValueError(
+                "country_pace allows only concurrency, requests, low_*, seconds and ceiling"
+            )
         for key, value in entry.items():
             if type(value) is not int or value <= 0:
                 raise ValueError(f"country_pace {key} must be a positive integer")
         if entry["concurrency"] > ceiling:
             raise ValueError("country_pace concurrency cannot exceed the manifest's")
+        if not entry["concurrency"] <= entry.get("ceiling", ceiling) <= ceiling:
+            raise ValueError("country_pace ceiling must be from its concurrency to the manifest's")
 
 
 def of(manifest: dict, country: str) -> dict:

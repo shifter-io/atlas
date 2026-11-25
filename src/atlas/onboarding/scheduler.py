@@ -109,12 +109,15 @@ def _census_config(context: JobContext, proxy, country: str) -> RunConfig:
     test's country runs at its manifest pace (onboarding.country_pace) under the manifest's
     concurrency, which stays its scope's. A low-availability country (its pace's low cap) runs
     beside the cell's other low ones (onboarding.rounds): in one process, growing to at most its
-    share of the concurrency."""
+    share of the concurrency; a country with a grammar ceiling grows to at most that."""
     pace = country_pace.of(context.manifest, country)
     effective = dict(context.effective)
     if country_pace.low(context.manifest, country):
         width = country_pace.low_width(context.manifest, effective["concurrency"])
         effective |= {"processes": 1, "grow_ceiling": effective["concurrency"] // width}
+    if "ceiling" in pace:  # its grammar ceiling (daily.pace, DAILY-PACE-1)
+        most = effective.get("grow_ceiling") or pace["ceiling"]
+        effective["grow_ceiling"] = min(most, pace["ceiling"])
     classes = (
         answer_classes(context.manifest["provider"])
         if effective.pop("answer_classes", False)
