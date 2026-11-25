@@ -25,6 +25,9 @@ is served. LATENCY-ALWAYS-1 (the owner's rule: always a value): a pair that fail
 country rule is compared on the countries tested in both periods (COMMON_SHARE of the countries
 tested over the two, at least COMMON_MIN; "scope": "common") before the next shorter one,
 and a window left without a value keeps the last one computed (latency_carry.carry()).
+
+LATENCY-DELTA-1: with a latency basket, a period's p50 is its basket p50, the headline's rule
+(latency_basket.deltas(), latency_month.py), compared by pick() and compare() the same way.
 """
 
 from __future__ import annotations
@@ -67,21 +70,30 @@ def _day(rows, minimum, start, days, countries=None):
     """The period of `days` whole days from start (of only `countries`' rows when given): its
     headline p50 (each slot with `minimum` light-load successes weighs the same) and its
     countries tested with `minimum` light-load successes."""
-    span = days * DAY
-    own = [r for r in rows if start <= r["bucket_start"] < start + span]
+    own = inside(rows, start, days)
     if countries is not None:
         own = [r for r in own if (r["country"] or "") in countries]
-    successes = Counter()
-    for r in own:
-        if _light(r):
-            successes[r["country"] or ""] += r["counters"]["successes"]
     votes = light_votes(time_slots(own), minimum)
     return {
         "start": start,
-        "end": start + span,
+        "end": start + days * DAY,
         "p50": blended(h for *_, h in votes)["p50"],
-        "countries": sorted(c for c, n in successes.items() if n >= minimum),
+        "countries": tested(own, minimum),
     }
+
+
+def inside(rows, start, days):
+    """The rows of the period of `days` whole days from start."""
+    return [r for r in rows if start <= r["bucket_start"] < start + days * DAY]
+
+
+def tested(rows, minimum):
+    """The countries of rows with `minimum` light-load successes, sorted."""
+    successes = Counter()
+    for r in rows:
+        if _light(r):
+            successes[r["country"] or ""] += r["counters"]["successes"]
+    return sorted(c for c, n in successes.items() if n >= minimum)
 
 
 def window_delta(rows, target, as_of, minimum, days=1):
@@ -97,7 +109,13 @@ def latency_day_delta(rows, as_of, minimum, days=1):
     normal requests against the earlier period's, in percent (positive: slower), None with the
     day rule's reason when no pair passes (module docstring). "days" holds the two periods."""
     since = min((r["bucket_start"] for r in rows), default=None)
-    period = partial(_day, rows, minimum)
+    return pick(partial(_day, rows, minimum), since, as_of, days)
+
+
+def pick(period, since, as_of, days):
+    """latency_day_delta() of a network first tested at `since` (None: never) whose periods
+    period(start, days, countries=None) gives as _day() does (latency_basket.deltas(): their
+    basket p50)."""
     for n in FALLBACK[days]:
         pair = day_pair(as_of, n)
         periods = [period(start, n) for start in pair]

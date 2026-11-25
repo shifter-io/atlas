@@ -12,6 +12,10 @@ network.attach(), which has the connection) adds the stored records of the earli
 fills the store with the last 30 days and a late test is written again. A record written by a
 later cutoff is never replaced by an earlier one's (a replay). Records are kept KEEP_DAYS whole
 days back from the cutoff's day.
+
+LATENCY-DELTA-1: with a latency basket, a record also holds each basket country's merged weights
+("by_country", calculated_latency_country_days) and the basket ("basket"), and the 30d change
+compares the periods' basket p50 (latency_month.py).
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ from datetime import UTC, datetime, timedelta
 from psycopg.rows import tuple_row
 from psycopg.types.json import Jsonb
 
-from . import latency_carry
+from . import latency_carry, latency_month
 from .latency import percentiles, weighed
 from .latency_days import compare, day_pair
 from .underload import light_votes, time_slots
@@ -41,12 +45,18 @@ OLDER = (
 )
 DIGESTS = "SELECT provider,kind,day,digest FROM calculated_latency_days WHERE target=%s AND day>=%s"
 WRITE = (
-    "INSERT INTO calculated_latency_days AS d VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+    "INSERT INTO calculated_latency_days AS d VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
     "ON CONFLICT(provider,kind,target,day) DO UPDATE SET minimum=excluded.minimum,"
     "slots=excluded.slots,ms=excluded.ms,weights=excluded.weights,"
-    "countries=excluded.countries,digest=excluded.digest,as_of=excluded.as_of "
-    "WHERE d.as_of<=excluded.as_of"
+    "countries=excluded.countries,digest=excluded.digest,as_of=excluded.as_of,"
+    "basket=excluded.basket WHERE d.as_of<=excluded.as_of RETURNING day"
 )
+# A day's basket countries (latency_month.py), replaced when the day is written.
+FORGET = (
+    "DELETE FROM calculated_latency_country_days "
+    "WHERE provider=%s AND kind=%s AND target=%s AND day=%s"
+)
+WRITE_COUNTRY = "INSERT INTO calculated_latency_country_days VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"
 
 
 def utc_day(moment):
@@ -55,30 +65,35 @@ def utc_day(moment):
     return datetime(moment.year, moment.month, moment.day, tzinfo=UTC)
 
 
-def day_records(rows, target, since, end, minimum):
-    """{"target", "minimum", "raw", "days"}: raw is the first whole UTC day from since, days the
-    record of every whole UTC day in [since, end) with rows of the latency target (rows: the
-    network's bucket rows)."""
+def day_records(rows, target, since, end, minimum, settings=None):
+    """{"target", "minimum", "raw", "days", "settings"}: raw is the first whole UTC day from
+    since, days the record of every whole UTC day in [since, end) with rows of the latency target
+    (rows: the network's bucket rows), each with its basket countries' weights when settings
+    (the methodology's [latency], policy.latency_basket()) are given."""
     raw = utc_day(since) + (DAY if utc_day(since) < since else timedelta())
     by_day = defaultdict(list)
     for r in rows:
         if r["target"] == target:
             by_day[utc_day(r["bucket_start"])].append(r)
     days = [
-        _record(day, own, minimum)
+        _record(day, own, minimum, settings and settings["basket"])
         for day, own in sorted(by_day.items())
         if raw <= day and day + DAY <= end
     ]
-    return {"target": target, "minimum": minimum, "raw": raw, "days": days}
+    found = {"target": target, "minimum": minimum, "raw": raw, "days": days}
+    return found | {"settings": settings}
 
 
-def _record(day, rows, minimum):
+def _record(day, rows, minimum, basket):
     successes = Counter()
     for r in rows:
         if not r.get("loaded") and r.get("light", True):  # latency_days._light()
             successes[r["country"] or ""] += r["counters"]["successes"]
     weights, used = weighed(h for *_, h in light_votes(time_slots(rows), minimum))
-    return {"day": day, "slots": used, "weights": dict(weights), "countries": dict(successes)}
+    found = {"day": day, "slots": used, "weights": dict(weights), "countries": dict(successes)}
+    if basket:
+        found["by_country"] = latency_month.by_country(rows, minimum, basket)
+    return found
 
 
 def _period(records, minimum, start, days):
@@ -130,22 +145,35 @@ def complete(conn, networks, as_of):
             )
         for provider, kind, day, digest in cur.execute(DIGESTS, (target, raw)):
             digests[provider, kind, day] = digest
+        if first["settings"]:
+            months = latency_month.months(conn, found, older, as_of)
+        else:
+            months = {k: delta(older[k] + o["days"], as_of, minimum) for k, (_, o) in found.items()}
         for key, (window, own) in found.items():
-            month = delta(older[key] + own["days"], as_of, minimum)
-            if month["pct"] is not None or "latency_day_delta" not in window:
-                window["latency_day_delta"] = month
+            if months[key]["pct"] is not None or "latency_day_delta" not in window:
+                window["latency_day_delta"] = months[key]
             _write(conn, key, own, digests, as_of)
     conn.execute("DELETE FROM calculated_latency_days WHERE day<%s", (keep,))
+    conn.execute("DELETE FROM calculated_latency_country_days WHERE day<%s", (keep,))
     latency_carry.carry(conn, networks)
 
 
 def _write(conn, key, own, digests, as_of):
-    """Write the network's records whose content differs from the stored one."""
+    """Write the network's records whose content differs from the stored one, each with its
+    basket countries' rows (latency_month.by_country()) when the record is written."""
     for r in own["days"]:
         ms = sorted(r["weights"])
         content = [own["minimum"], r["slots"], ms, [r["weights"][m] for m in ms]]
         countries = dict(sorted(r["countries"].items()))
-        digest = hashlib.sha256(json.dumps([*content, countries]).encode()).hexdigest()
+        basket = own["settings"] and own["settings"]["basket"]
+        hashed = [*content, countries]
+        if "by_country" in r:
+            hashed += [basket, latency_month.arrays(r["by_country"])]
+        digest = hashlib.sha256(json.dumps(hashed).encode()).hexdigest()
         if digests.get((*key, r["day"])) != digest:
             row = (*key, own["target"], r["day"], *content, Jsonb(countries), digest, as_of)
-            conn.execute(WRITE, row)
+            if conn.execute(WRITE, (*row, basket)).fetchone() and "by_country" in r:
+                place = (*key, own["target"], r["day"])
+                conn.execute(FORGET, place)
+                found = [(*place, c, *bins) for c, bins in hashed[-1].items()]
+                conn.cursor().executemany(WRITE_COUNTRY, found)

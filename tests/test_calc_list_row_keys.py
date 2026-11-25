@@ -70,9 +70,9 @@ async def test_v22_layer_drops_the_label_keys_and_keeps_every_row(
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         22,
-        23,
+        24,
     )
-    assert result["verified"] == list(store.V22_CHECKS)
+    assert result["verified"] == [*store.V22_CHECKS, *store.V23_CHECKS]
     with connect(database) as conn:
         assert conn.execute(store.V22_CHECKS["list rows without label keys"]).fetchone() == (0,)
         assert (conn.execute(ROWS).fetchall(), conn.execute(TOTALS).fetchone()) == before

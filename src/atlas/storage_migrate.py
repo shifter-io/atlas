@@ -176,7 +176,8 @@ def compacted(start, layered, upgraded):
     empty tables and a nullable column, v16 → v17 and v17 → v18 an empty table, calculated
     v18 → v19 a small table filled from the published heads, calculated v19 → v20 empty
     tables and an index, calculated v20 → v21 a constant-default column of the small table, and
-    calculated v22 → v23 drops two foreign keys: no rewrite. v18 → v19 updates some rows of the
+    calculated v22 → v23 drops two foreign keys and calculated v23 → v24 adds a nullable column
+    and an empty table: no rewrite. v18 → v19 updates some rows of the
     small country_verdicts table (one row a daily test): nothing worth compacting. v19 → v20
     drops a column of that small table, v20 → v21 swaps a check constraint and v21 → v22 adds a
     nullable column: no rewrite.

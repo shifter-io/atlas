@@ -28,7 +28,7 @@ from pathlib import Path
 # The hashed modules (by file stem) that make none of a daily list's rows or figures.
 NOT_LISTS = frozenset(
     "network network_scores scores target_scores value_rank value_all latency_days latency_store "
-    "latency_carry latency_basket score_history card_success standing traffic".split()
+    "latency_carry latency_basket latency_month score_history card_success standing traffic".split()
 )
 DOCUMENTED = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 

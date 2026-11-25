@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -181,3 +181,18 @@ LABEL_ORPHANS = (
     "(SELECT FROM place_names p WHERE p.place_id=r.place_id) OR r.asn_label_id IS NOT NULL "
     "AND NOT EXISTS (SELECT FROM asn_labels a WHERE a.asn_label_id=r.asn_label_id)"
 )
+
+# Checksum of the unmodified calculated v23 schema (CALC-PERF-4's list rows without label keys).
+V23_CHECKSUM = "24ff4915d2b74c823d4d24e6cefbc3e270307f3530dc485097f267193f3bc18e"
+# A v23 layer's latency days gain their basket countries (NULL) and the empty per-country latency
+# days (LATENCY-DELTA-1); every stored day stays as it was.
+V23_SNAPSHOT = (
+    "CREATE TEMP TABLE v23_before ON COMMIT DROP AS SELECT provider,kind,target,day,minimum,"
+    "slots,ms,weights,countries,digest,as_of FROM calculated_latency_days"
+)
+V23_CHECKS = {
+    "latency days kept with their basket": "SELECT count(*) FROM v23_before o FULL JOIN "
+    "calculated_latency_days n USING(provider,kind,target,day) WHERE "
+    "(o.minimum,o.slots,o.ms,o.weights,o.countries,o.digest,o.as_of) IS DISTINCT FROM "
+    "(n.minimum,n.slots,n.ms,n.weights,n.countries,n.digest,n.as_of)",
+}
