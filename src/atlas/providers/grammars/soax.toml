@@ -72,6 +72,9 @@ ttl_flag = "ttl"
 
 [testing]
 max_concurrency = 500 # CONC-1 probe 2026-10-24: highest step that passed, one c-4 worker, US, 25,000 requests
+# DAILY-PACE-1 (2026-11-23 ramps): the gateway refuses above the plan's request-rate limit of
+# 1,500 requests a second; 500 at once ran about 1,700-1,800 a second, 350 about 1,200 with none
+country_max_concurrency = { US = 350 }
 # LOWAVAIL-1 (2026-11-15 daily tests, docs/reports/lowavail-answers.md): no exits in the country;
 # 30.4% of requests in countries under 10 IPs, 0.02% in big ones
 no_inventory_statuses = [502]

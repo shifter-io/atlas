@@ -196,6 +196,24 @@ def _forbidden_host(testing: Mapping[str, Any]) -> tuple[str, str] | None:
     return value["header"].lower(), value["contains"].strip().lower()
 
 
+def _country_ceilings(testing: Mapping[str, Any]) -> Mapping[str, int]:
+    """[testing] country_max_concurrency = { CC = n }: the most requests a country's daily test
+    holds in flight (daily.pace), each an integer 1-MAX_CONCURRENCY; empty when unset."""
+    value = testing.get("country_max_concurrency", {})
+    if not isinstance(value, Mapping) or not all(
+        isinstance(code, str)
+        and re.fullmatch(r"[A-Z]{2}", code)
+        and type(most) is int
+        and 1 <= most <= MAX_CONCURRENCY
+        for code, most in value.items()
+    ):
+        raise ValueError(
+            "Grammar country_max_concurrency must map country codes to integers "
+            f"1-{MAX_CONCURRENCY}"
+        )
+    return MappingProxyType(dict(value))
+
+
 def _testing(testing: Mapping[str, Any]) -> dict[str, Any]:
     """The Grammar fields of the [testing] table: protocol, concurrency, answer classes, the
     network's own IP-check URLs and its "forbidden destination" answer."""
@@ -217,6 +235,7 @@ def _testing(testing: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "test_protocol": protocol,
         "max_concurrency": ceiling,
+        "country_max_concurrency": _country_ceilings(testing),
         "rate_limit_statuses": limits,
         "rate_limit_connect": connect,
         "no_inventory_statuses": empty,

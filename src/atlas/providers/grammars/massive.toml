@@ -71,6 +71,10 @@ default_ttl_seconds = 900
 
 [testing]
 max_concurrency = 2000 # CONC-1 probe 2026-10-24: highest step that passed, one c-4 worker, US, 25,000 requests
+# DAILY-PACE-1 (2026-11-20/22 daily tests): the gateway refused 75-97% of connections after
+# 15-25 s at about 2,000 requests a second; about 1 a second per connection, so 1,000 at once
+# keeps the country near 70% of the rate the refusals began at
+country_max_concurrency = { GB = 1000 }
 # LOWAVAIL-1 (2026-11-15 daily tests, docs/reports/lowavail-answers.md): no exits in the country;
 # 470 61.6% and 471 24.7% of requests in countries under 10 IPs, 0% in big ones
 no_inventory_statuses = [470, 471]
