@@ -18,21 +18,27 @@ coverage ("covered" of "size" basket countries), the countries' values used, the
 and the pooled latency it replaced ("pooled_ms"), so one build shows the old and the new figure.
 
 Product group windows keep the pooled latency: only the network windows are served. The latency
-under load, the other targets' latency, the per-place latency and the latency change
-(latency_days.py) keep their rules.
+under load, the other targets' latency and the per-place latency keep their rules.
+
+LATENCY-DELTA-1: the latency change (latency_days.py) compares each period's basket p50, the same
+rule over the period's rows and the networks' periods of the same kind and window (periods(),
+deltas()); the 30d change's 30-day periods the same over the per-day store (latency_month.py).
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
+from functools import partial
 from statistics import median
 
 from .latency import KEYS, LATENCY, blended
+from .latency_days import DAY, FALLBACK, day_pair, inside, pick, tested
 from .policy import latency_basket as settings
 from .underload import light_votes, time_slots
 
 AGGREGATES = {"mean": lambda values: sum(values) / len(values), "median": median}
 NO_BASKET = "No basket country with enough pulse successes in this window"
+P50 = ("p50",)  # the latency change compares the p50
 
 
 def countries(rows, target, minimum, basket):
@@ -67,14 +73,14 @@ def measure(rows, target, minimum, basket, points):
     }
 
 
-def slowest(owns, basket):
+def slowest(owns, basket, keys=KEYS):
     """Per basket country some network has a latency in, each key's highest (slowest) value
     among owns (the networks' countries())."""
     found = {}
     for c in basket:
         values = [own[c] for own in owns if c in own]
         if values:
-            found[c] = {k: max(v[k] for v in values) for k in KEYS}
+            found[c] = {k: max(v[k] for v in values) for k in keys}
     return found
 
 
@@ -141,3 +147,53 @@ def _points(members, found):
             if at in points:
                 latency = basket_latency(own, penalty, found["aggregate"], LATENCY)[0]
                 points[at]["latency_ms"] = latency
+
+
+def periods(rows, target, minimum, basket, as_of, days):
+    """A network window's "_delta" (LATENCY-DELTA-1): the network's first test ("since") and,
+    per period latency_days.pick() may compare ({(days, start): ...}), its tested countries
+    and its basket countries' p50 ("own", countries() over the period's rows)."""
+    rows = [r for r in rows if r["target"] == target]
+    found = {}
+    for n in FALLBACK[days]:
+        for start in day_pair(as_of, n):
+            own = inside(rows, start, n)
+            latency = countries(own, target, minimum, basket)
+            mine = {c: {"p50": v["p50"]} for c, v in latency.items()}
+            found[n, start] = {"countries": tested(own, minimum), "own": mine}
+    since = min((r["bucket_start"] for r in rows), default=None)
+    return {"since": since, "as_of": as_of, "days": days, "periods": found}
+
+
+def deltas(networks, config):
+    """Each network window's latency_day_delta from its "_delta" (popped): latency_days.pick()
+    over its periods' basket p50, each period's penalties among the measured networks of the
+    same kind and window (a held window's: and its own, standing.py)."""
+    found = settings(config)
+    peers = defaultdict(list)
+    for entry in networks:
+        for label, w in entry["windows"].items():
+            if (own := w.pop("_delta", None)) is not None:
+                peers[entry["kind"], label].append((w, own))
+    for members in peers.values():
+        live = [own["periods"] for w, own in members if "_held" not in w]
+        shared = penalties(live, found["basket"]) if live else None
+        for w, own in members:
+            mine = penalties([*live, own["periods"]], found["basket"]) if "_held" in w else shared
+            period = partial(_period, own["periods"], mine, found["aggregate"])
+            w["latency_day_delta"] = pick(period, own["since"], own["as_of"], own["days"])
+
+
+def penalties(owns, basket):
+    """slowest() p50 of each period of owns (networks' {period: {"own": countries' p50}})."""
+    return {key: slowest([o[key]["own"] for o in owns], basket, P50) for key in owns[0]}
+
+
+def _period(periods, penalty, aggregate, start, days, countries=None):
+    """latency_days._day() of a network's period: its basket p50 (of only `countries`' own
+    values when given, the other basket countries at their penalty)."""
+    p = periods[days, start]
+    own = {c: v for c, v in p["own"].items() if countries is None or c in countries}
+    listed = [c for c in p["countries"] if countries is None or c in countries]
+    p50 = basket_latency(own, penalty[days, start], aggregate, P50)[0]["p50"]
+    return {"start": start, "end": start + days * DAY, "p50": p50, "countries": listed}

@@ -1568,13 +1568,14 @@ fifth with the opening fifth of observed samples in the selected window. Finer
 Success is a percentage-point difference. Two observations are required.
 
 `latencyDeltaPct` (LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1) compares whole days
-(since LATENCY-BASKET-1 it compares the network's pooled pulse latency, not the basket
-`latencyP50`: its own change, with no penalty, both periods by the same rule; a basket-based
-change is a follow-up)
 instead: every country has one daily test a day at its own hour, so only a whole day holds
-every country. It is the headline latency p50 (the pulses' latency of normal requests, the
-countries counted those the pulses tested; HEADLINE-PULSE-1; the latency under load never
-enters it) of the last whole UTC day against the day before it (24h), of the last 7 whole UTC
+every country. It is the headline latency p50 (the pulses' latency of normal requests;
+HEADLINE-PULSE-1; the latency under load never enters it) by the headline's rule,
+LATENCY-BASKET-1 (since LATENCY-DELTA-1, #1386; before, the pooled latency of the countries the
+pulses tested): each period's mean over the basket countries of the network's p50 in each, a
+basket country it has no p50 in during that period counting as the slowest network's of the same
+kind there in the same period, so the change follows `latencyP50`. A timeout counts at its run's
+limit, as in every latency (TIMEOUT-LATENCY-1). It compares that p50 of the last whole UTC day against the day before it (24h), of the last 7 whole UTC
 days against the 7 before them (7d), and of the last 30 against the 30 before them (30d), in
 percent at 1 dp, positive when slower. The calculator makes it once a day at 03:00 UTC, after
 the last daily tests of the day before have finished, over the whole days before that hour
@@ -1596,9 +1597,9 @@ periods that fails only the 90% country rule (one day or week partly tested, suc
 15 Nov 2026 with its 15:00 hour excluded: 159 countries against 205) is compared on the
 countries tested in both periods, each with `min_latency_successes` successes, both p50s made of
 only their rows, when those are at least half of the countries tested over the two periods and
-at least 5 (`COMMON_SHARE`, `COMMON_MIN`), before the next shorter periods; the basis stays the
-periods' (`day`, `week`). The 30-day comparison has no such step: the per-day store keeps each
-day's merged latency, not each country's, so it falls back to the weeks. When no pair gives a
+at least 5 (`COMMON_SHARE`, `COMMON_MIN`), before the next shorter periods (the other basket
+countries at their penalty in both); the basis stays the periods' (`day`, `week`). The 30-day
+comparison has no such step: it falls back to the weeks. When no pair gives a
 value, the network keeps the last value computed for it (the current build's, carried on build
 after build, `calculated/latency_carry.py`) with its own basis; `latencyDeltaAsOf` is the last
 UTC day (`YYYY-MM-DD`) the compared periods cover: the day before the calculation's day for a
@@ -1615,7 +1616,10 @@ without a snapshot product). It is served wherever `latencyDeltaPct` is: `/v1/ra
 calculator reads 30 days of raw rows, so the 30-day comparison takes the 30 days before them
 from its per-day latency store (LATENCY-DAY-STORE-1, `calculated/latency_store.py`, filled
 from the raw rows since its first calculation): a network live since 14 Nov 2026 gets its
-first on about 13 Jan 2027, and its first 7-day comparison on about 28 Nov 2026. The
+first on about 13 Jan 2027, and its first 7-day comparison on about 28 Nov 2026. Each stored
+day keeps each basket country's latency (calculated v24, `calculated_latency_country_days`,
+`calculated/latency_month.py`); a period holding a day stored before v24 has no 30-day value,
+so 30d shows the 7-day comparison until 30 days after the v24 deploy. The
 changelog `performance` entries compare the same two periods, their `values.basis` the same
 code.
 

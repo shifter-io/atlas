@@ -77,6 +77,7 @@ FACTS = (
     ("calculated_ip_last_seen", HOURS.format("last_seen")),
     ("calculated_scope_ip_last_seen", HOURS.format("last_seen")),
     ("calculated_unique_ips", HOURS.format("starts")),
+    ("calculated_latency_country_days", HOURS.format("day")),
     ("calculated_latency_days", HOURS.format("day")),
     ("calculated_score_history", HOURS.format("as_of")),
     # Each sums hour rollups the wipe may remove: all summed again by the next calculation.

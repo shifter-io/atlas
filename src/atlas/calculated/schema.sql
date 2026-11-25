@@ -165,12 +165,23 @@ CREATE TABLE IF NOT EXISTS calculated_unique_ips (
 -- v18, latency_store.py): the merged weights of its slots with `minimum` light-load successes
 -- (ms ascending, each slot weighing 1 in all) and each country's light-load successes, the 30d
 -- latency change's days before the raw window; written when its content (digest) changes, never by
--- an earlier cutoff (as_of) than the last writer's, kept 62 whole days.
+-- an earlier cutoff (as_of) than the last writer's, kept 62 whole days. basket (calculated v24,
+-- LATENCY-DELTA-1): the latency basket's countries when it was written, whose latency the day's
+-- calculated_latency_country_days rows hold; NULL on a day written before or without a basket.
 CREATE TABLE IF NOT EXISTS calculated_latency_days (
  provider text NOT NULL, kind text NOT NULL, target text NOT NULL, day timestamptz NOT NULL,
  minimum integer NOT NULL, slots integer NOT NULL, ms integer[] NOT NULL,
  weights double precision[] NOT NULL, countries jsonb NOT NULL, digest text NOT NULL,
- as_of timestamptz NOT NULL, PRIMARY KEY(provider,kind,target,day)
+ as_of timestamptz NOT NULL, basket text[], PRIMARY KEY(provider,kind,target,day)
+);
+-- Each basket country's part of a calculated_latency_days day with its latency (calculated v24,
+-- LATENCY-DELTA-1, latency_month.py): the merged weights of the country's slots with the day's
+-- `minimum` light-load successes, which the 30d latency change's basket p50 merges per period.
+-- Written with its day, kept as long.
+CREATE TABLE IF NOT EXISTS calculated_latency_country_days (
+ provider text NOT NULL, kind text NOT NULL, target text NOT NULL, day timestamptz NOT NULL,
+ country text NOT NULL, slots integer NOT NULL, ms integer[] NOT NULL,
+ weights double precision[] NOT NULL, PRIMARY KEY(provider,kind,target,day,country)
 );
 -- Each network's (provider and kind's) Atlas Score per window (period: 24h, 7d, 30d) as each
 -- published build published it (ATLAS-SCORE-SPARK-1, calculated v19, score_history.py): the

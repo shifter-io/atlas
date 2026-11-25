@@ -149,6 +149,7 @@ def scored(networks, held, as_of, config):
     standing.mark(networks, held or {}, as_of, config)
     live = standing.live(networks)
     latency_basket.apply(live, config)
+    latency_basket.deltas(networks, config)
     target_scores.score_networks(live, config)
     days = [n for n in networks if "_held" not in n["windows"].get("30d", {})]
     target_scores.score_days(days, config)
@@ -206,7 +207,8 @@ class Network:
                 self.counting[country] += found
         self.minimum = slot_settings(config)["min_latency_successes"]
         self.target = latency_target(config)
-        self.basket = (basket_settings(config) or {}).get("basket")
+        self.latency = basket_settings(config)
+        self.basket = (self.latency or {}).get("basket")
         self.threshold = uptime_settings(config)["min_successes"]
         self.measured = uptime_settings(config)["basis"] == "measured_time"
         self.lead = lead(groups, self.scheduled)
@@ -300,13 +302,20 @@ class Network:
             found["_basket"] = latency_basket.measure(*own)
         if label == "30d":  # LATENCY-DAY-STORE-1: attach() makes its month with the stored days
             own = (self.rows, self.target, since, end, self.minimum)
-            found["_latency_days"] = latency_store.day_records(*own)
+            found["_latency_days"] = latency_store.day_records(*own, self.latency)
         if label in PERIOD_DAYS:  # LATENCY-DELTA-24H-1, -PERIOD-1; 30d: its week or day here
-            days = min(PERIOD_DAYS[label], 7)
-            found["latency_day_delta"] = window_delta(
-                self.rows, self.target, end, self.minimum, days
-            )
+            found |= self.delta(end, min(PERIOD_DAYS[label], 7))
         return found
+
+    def delta(self, end, days):
+        """A window's latency change over periods of `days` whole days to end: with a basket,
+        {"_delta": its periods}, which latency_basket.deltas() compares in scored()
+        (LATENCY-DELTA-1), else {"latency_day_delta": the change of the pooled latency}."""
+        if self.basket:
+            own = (self.rows, self.target, self.minimum, set(self.basket), end, days)
+            return {"_delta": latency_basket.periods(*own)}
+        own = (self.rows, self.target, end, self.minimum, days)
+        return {"latency_day_delta": window_delta(*own)}
 
     def days(self, groups, cfg):
         """The 30d window's days (none without one): each {"start", "targets"}, the targets()

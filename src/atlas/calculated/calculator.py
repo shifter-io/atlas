@@ -77,7 +77,7 @@ SOURCES = "calculator aggregate policy slim inputs lists list_write incremental 
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
 SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all fleet_verdicts"
 SOURCES += " latency_days latency_store latency_carry score_history rollup_days carried_lists"
-SOURCES += " card_success latency_basket standing standing_shift timeout_latency"
+SOURCES += " card_success latency_basket standing standing_shift timeout_latency latency_month"
 IMPLEMENTATION_ID, LISTS_ID = implementation.ids(
     [Path(__file__).with_name(f"{name}.py") for name in SOURCES.split()]
     + [Path(m.__file__) for m in (detect, traffic, browser, verdicts, no_exit_answers)]
