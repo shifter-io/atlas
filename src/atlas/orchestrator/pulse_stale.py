@@ -1,7 +1,8 @@
 """PULSE-OUTAGE-CLOSE-1: per-country pulse outages that the data says are over.
 
 detect.py opens a per-country pulse outage (source 'pulse', batch_id set) when a network gets no
-success at all in a country (every target of the slot), and ends it with the network's next
+success at all in a country (every target of the slot; a target's series twice in a row,
+PULSE-NODE-DNS-2), and ends it with the network's next
 pulse there that gets through, on any target. An outage can still stay open after its end:
 one opened by an older rule (a single target's failure), or past its closing pulse under one
 (a comeback below the baseline used to keep it open). The pulse evaluator therefore closes, at

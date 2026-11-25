@@ -3,7 +3,8 @@ against an isolated PostgreSQL.
 
 The fixture: 2 days of hourly pulses (and 3 before them) of alpha, beta and gamma in DE, FR, PL
 and US, each a run with its own median latency. alpha is down in DE (slots 10 to 13: down, then
-recovered) and slower in US (slots 25 and 26: one latency spike); beta is blocked in FR (slots
+recovered), fails once in PL (slot 30: no 'down', no outage, PULSE-NODE-DNS-2) and is slower
+in US (slots 25 and 26: one latency spike); beta is blocked in FR (slots
 15 and 16: one block spike) and down in PL from slot 40 to the end (an outage still open); gamma
 drops in US (slots 14 to 18: success_drop, recovered) and has a census outage in FR (from
 before the span, closed by its next pulse); alpha and beta exit through a hosting ASN once each.
@@ -58,6 +59,8 @@ def pulse(name, country, slot):
     successes, blocks, p50 = 95, 0, 200 + 10 * COUNTRIES.index(country)
     if name == "alpha" and country == "DE":
         successes = 0 if slot in range(10, 14) else 95 - 7 * (slot % 2)
+    if name == "alpha" and country == "PL" and slot == 30:
+        successes = 0
     if name == "alpha" and country == "US" and slot in (25, 26):
         p50 = 900
     if name == "beta" and country == "FR" and slot in (15, 16):
@@ -161,6 +164,8 @@ async def test_the_fast_replay_gives_the_step_replays_events_and_outages(
     assert [e[3] for e in census] == ["FR"]
     by = {(row[0], row[1].strip(), row[3]): row for row in outages}
     assert by[(alpha, "DE", "pulse")][6] is not None and by[(beta, "PL", "pulse")][6] is None
+    assert (alpha, "PL", "pulse") not in by
+    assert not [e for e in events if e[0] == "down" and e[2] == alpha and e[3].strip() == "PL"]
     assert by[(gamma, "FR", "census")][6] == T0
 
 

@@ -812,7 +812,8 @@ uv run atlas calculate --database-file <toml> --as-of <the day after the last, 0
 - **Outages** (the plan in `--plan-only` and in `state.json`, `score_inputs.plan`). A down
   pulse is a done run with requests and no success, in both targets of a country, so the
   tape's `detect()` opens an outage at the last healthy pulse and closes it at the next healthy
-  one. The published uptime is 1 − downtime ÷ (window × countries tested), and the countries
+  one. It opens one only from the second down pulse in a row (PULSE-NODE-DNS-2), so every
+  planned outage has at least two. The published uptime is 1 − downtime ÷ (window × countries tested), and the countries
   tested are those with a started pulse or census batch run (`scheduled.py` `tested_spans`;
   daily tests have no batch): a network's pulse countries. So each outage is sized against them:
   every network has one outage on each pulse day, after 8 healthy pulses, in as many of the

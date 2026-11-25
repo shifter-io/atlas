@@ -16,6 +16,7 @@ from synthetic import LATENCY, WEIGHTS, apportion, key, unit
 VERSION = "score-inputs-2"  # 2: one load factor (#873); 1: per network, 1.1 to 1.8
 MARK = {"synthetic": True, "score_inputs": VERSION}  # in every added run's summary
 BASELINE = 8  # healthy pulses of a series before its first down one (detect needs 6)
+DOWN = 2  # down pulses an outage needs at least (detect confirms it with the second one)
 GAP = 2  # healthy pulses between two outages of a country
 LOAD_IPS = 100  # the most exit IPs one load run draws
 JITTER = 0.03  # success rate and latency move within 1 +- JITTER from slot to slot
@@ -146,7 +147,7 @@ def network_outages(inputs: Inputs, seed, network: str, tier: str, worst: int, o
         size = min(len(countries), max(1, round(down * len(countries) / minutes)))
         chosen = tuple(countries[(k + i) % len(countries)] for i in range(size))
         # The outage runs from the last healthy pulse: one slot before the first down one.
-        slots = min(max(1, round(minutes / inputs.step) - 1), inputs.slots - BASELINE)
+        slots = min(max(DOWN, round(minutes / inputs.step) - 1), inputs.slots - BASELINE)
         open_end = ongoing and day == worst
         start = BASELINE + k % (inputs.slots - BASELINE - slots + 1)
         start = inputs.slots - slots if open_end else start
@@ -174,7 +175,7 @@ def outages(inputs: Inputs, seed) -> list[Outage]:
         index = max(i for i, o in enumerate(plan) if o.network == network and o.slots)
         o = plan[index]
         more = [c for c in inputs.countries[network, o.day] if c not in o.countries][:1]
-        grown = o.slots + 1 if o.slot + o.slots < inputs.slots else max(1, o.slots - 1)
+        grown = o.slots + 1 if o.slot + o.slots < inputs.slots else max(DOWN, o.slots - 1)
         plan[index] = replace(o, countries=(*o.countries, *more), slots=o.slots if more else grown)
     return plan
 

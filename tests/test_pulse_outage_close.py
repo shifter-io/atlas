@@ -35,10 +35,11 @@ def test_a_down_ends_with_the_first_pulse_through_even_below_its_baseline(databa
     seed(database)
     with connect(database) as conn:
         alpha = product(conn)
-        # Both targets down at pulse 6, then back but never near the 95 % baseline again.
+        # Both targets down at pulses 6 and 7 (confirmed at 7, PULSE-NODE-DNS-2), then back but
+        # never near the 95 % baseline again.
         for target in ("generic_http", "generic_https"):
-            pulses(conn, alpha, [95] * 6 + [0, 40, 45, 50], target=target)
-        detect(conn, after(9), config=SETTINGS)
+            pulses(conn, alpha, [95] * 6 + [0, 0, 40, 45, 50], target=target)
+        detect(conn, after(10), config=SETTINGS)
         assert _kinds(conn) == [
             ("down", "generic_http"),
             ("down", "generic_https"),
@@ -48,8 +49,8 @@ def test_a_down_ends_with_the_first_pulse_through_even_below_its_baseline(databa
             ("success_drop", "generic_https"),
         ]
         rows = conn.execute("SELECT started_at,ended_at FROM outages").fetchall()
-        # From the last healthy pulse (5) to the start of the first one through (7).
-        assert rows == [(T0 + timedelta(minutes=151), T0 + timedelta(minutes=210))]
+        # From the last healthy pulse (5) to the start of the first one through (8).
+        assert rows == [(T0 + timedelta(minutes=151), T0 + timedelta(minutes=240))]
 
 
 def test_one_target_failing_alone_is_its_down_on_the_tape_not_an_outage(database):
@@ -66,12 +67,12 @@ def test_one_target_failing_alone_is_its_down_on_the_tape_not_an_outage(database
 
 
 def test_an_outage_closes_with_one_target_back_while_the_other_keeps_failing(database):
-    """Both targets get nothing at pulse 6: an outage. HTTP is back at 7, HTTPS never: the outage
-    ends at pulse 7 (after one healthy pulse), the HTTPS series stays 'down' on the tape."""
+    """Both targets get nothing at pulses 6 and 7: an outage. HTTP is back at 8, HTTPS never: the
+    outage ends at pulse 8 (after one healthy pulse), the HTTPS series stays 'down' on the tape."""
     seed(database)
     with connect(database) as conn:
         alpha = product(conn)
-        pulses(conn, alpha, [95] * 6 + [0, 95, 95, 95])
+        pulses(conn, alpha, [95] * 6 + [0, 0, 95, 95])
         pulses(conn, alpha, [95] * 6 + [0] * 4, target="generic_https")
         detect(conn, after(9), config=SETTINGS)
         assert _kinds(conn) == [
@@ -80,24 +81,31 @@ def test_an_outage_closes_with_one_target_back_while_the_other_keeps_failing(dat
             ("recovered", "generic_http"),
         ]
         rows = conn.execute("SELECT started_at,ended_at FROM outages").fetchall()
-        assert rows == [(T0 + timedelta(minutes=151), T0 + timedelta(minutes=210))]
+        assert rows == [(T0 + timedelta(minutes=151), T0 + timedelta(minutes=240))]
+
+
+def _batch(conn, target, i):
+    """The batch of pulse i (pulses()) on the target."""
+    return conn.execute(
+        "SELECT batch_id FROM test_batches WHERE target_id=%s AND scheduled_for=%s",
+        (target, T0 + timedelta(minutes=30 * i)),
+    ).fetchone()[0]
 
 
 def test_a_target_already_down_alone_still_opens_the_outage_the_other_left_to_it(database):
-    """HTTPS is already 'down' on its own (HTTP fine). At pulse 8 HTTP gets nothing too and is
-    judged first, while the HTTPS batch is still running, so it leaves the outage to HTTPS; when
-    HTTPS ends with nothing (no new 'down': its series is down already) the outage opens, from
-    HTTP's last healthy pulse."""
+    """HTTPS is already 'down' on its own (HTTP fine to pulse 6; HTTPS's pulse 7 failed on our
+    side, never judged). HTTP gets nothing at 7 (a first one: no 'down') and at 8, judged first
+    while the HTTPS batch is still running, so it leaves the outage to HTTPS; when HTTPS ends
+    with nothing (no new 'down': its series is down already) the outage opens, from HTTP's last
+    healthy pulse."""
     seed(database)
     with connect(database) as conn:
         alpha = product(conn)
-        pulses(conn, alpha, [95] * 8 + [0])
-        pulses(conn, alpha, [95] * 6 + [0] * 3, target="generic_https")
-        https8 = conn.execute(
-            "SELECT batch_id FROM test_batches WHERE target_id='generic_https' "
-            "AND scheduled_for=%s",
-            (T0 + timedelta(minutes=240),),
-        ).fetchone()[0]
+        pulses(conn, alpha, [95] * 7 + [0, 0])
+        pulses(conn, alpha, [95] * 5 + [0] * 4, target="generic_https")
+        failed = _batch(conn, "generic_https", 7)
+        conn.execute("UPDATE batch_runs SET status='failed' WHERE batch_id=%s", (failed,))
+        https8 = _batch(conn, "generic_https", 8)
         conn.execute("UPDATE batch_runs SET status='running' WHERE batch_id=%s", (https8,))
         conn.execute(
             "UPDATE test_batches SET finished_at=finished_at+interval '9 minutes',status='running' "
@@ -111,7 +119,7 @@ def test_a_target_already_down_alone_still_opens_the_outage_the_other_left_to_it
         detect(conn, after(8) + timedelta(minutes=15), config=SETTINGS)
         assert _kinds(conn) == [("down", "generic_https"), ("down", "generic_http")]
         rows = conn.execute("SELECT started_at,ended_at FROM outages").fetchall()
-        assert rows == [(T0 + timedelta(minutes=30 * 7 + 1), None)]
+        assert rows == [(T0 + timedelta(minutes=30 * 6 + 1), None)]
 
 
 def _slot(conn, k, results, country="DE"):

@@ -38,9 +38,10 @@ def events_fixture(database):
     seed(database)
     with connect(database) as conn:
         alpha, beta = product(conn, "alpha"), product(conn, "beta", "datacenter")
-        pulses(conn, alpha, [95] * 6 + [0])
+        # alpha: the first pulse without success waits (pulse_finished), the second is 'down'.
+        pulses(conn, alpha, [95] * 6 + [0, 0])
         pulses(conn, beta, [95] * 6 + [60], target="generic_https")
-        detect(conn, after(6), config=SETTINGS)
+        detect(conn, after(7), config=SETTINGS)
         conn.execute(
             "INSERT INTO test_events(at,kind,country_code,region_id,signal,data) SELECT %s,"
             "'census_started','DE',region_id,0,'{\"requests\":0}' FROM countries "
@@ -71,9 +72,10 @@ async def test_events_api_filters_and_shape(database):
             "census_finished",
             "census_started",
             "success_drop",
+            "pulse_finished",
             "down",
         ]
-        down = everything[3]
+        down = everything[4]
         assert set(down) == {
             "id",
             "at",
@@ -106,7 +108,8 @@ async def test_events_api_filters_and_shape(database):
             "fra1",
             4,
         )
-        assert [e["kind"] for e in await get("?product=alpha")] == ["census_finished", "down"]
+        alphas = ["census_finished", "pulse_finished", "down"]
+        assert [e["kind"] for e in await get("?product=alpha")] == alphas
         assert await get("?product=alpha/residential&category=census") == [census]
         assert [e["kind"] for e in await get("?product=beta/datacenter")] == ["success_drop"]
         assert await get("?product=beta/residential") == []
@@ -122,7 +125,7 @@ async def test_events_api_filters_and_shape(database):
         # since is exclusive and empty means none (the site's first poll).
         newest = everything[0]["at"]
         assert await get("?since=" + newest.replace("+", "%2B")) == []
-        assert len(await get("?since=")) == 4
+        assert len(await get("?since=")) == 5
         # The down is at its outage's start, the drop at its run's finish (TAPE-TIME-1).
         assert len(await get("?since=" + times[1].isoformat().replace("+", "%2B"))) == 2
         for bad in ("?category=other", "?limit=0", "?limit=501", "?since=yesterday", "?x=1"):

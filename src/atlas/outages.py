@@ -126,12 +126,26 @@ def _outage_start(cur, batch, product):
     return min(since, start)
 
 
-def _open_outage(cur, batch, product):
+# Another target's pulse of the product in the batch's slot without success, with a try and not
+# mostly refused at login: a failure, whose series' previous pulse decides whether it is its first.
+OTHER_FAILED_SQL = (
+    "SELECT b.country_code,b.target_id,b.scheduled_for,b.finished_at FROM batch_runs br "
+    "JOIN test_batches b USING(batch_id) LEFT JOIN test_runs r ON r.run_key=br.run_key "
+    "WHERE b.kind='pulse' AND b.country_code=%s AND b.scheduled_for=%s AND b.batch_id<>%s "
+    "AND br.product_id=%s AND br.status='done' AND br.successes=0 "
+    f"AND br.requests-{no_exit_answers.run_sql()}>0 AND {proxy_login.MEASURED_SQL}"
+)
+
+
+def _open_outage(cur, batch, product, rule=False):
     """A pulse 'down' opens an outage, unless the product is down in the country already (an
     open outage, or a closed one that covered this batch's start: judging it again) or
     another of its targets in the same slot got through or is still running (PULSE-OUTAGE-
     CLOSE-1: an outage is the product without any success in the country; one target failing
-    alone is that target's 'down' on the tape only; a pending one opens it with its own 'down').
+    alone is that target's 'down' on the tape only; a pending one opens it with its own 'down')
+    or failed there for the first time after a success (PULSE-NODE-DNS-2: it waits for that
+    series' next pulse, which opens the outage with its own 'down', so a pulse of each failing
+    target can close it).
 
     It starts at _outage_start; returns that start either way.
     """
@@ -139,6 +153,9 @@ def _open_outage(cur, batch, product):
     since = _outage_start(cur, batch, product)
     other = (batch["country_code"], batch["scheduled_for"], batch["batch_id"], product)
     if _exists(cur, OTHER_TARGET_SQL, other):
+        return since
+    failed = cur.execute(OTHER_FAILED_SQL, other).fetchall()
+    if not all(_failed_before(cur, row, product, rule) for row in failed):
         return since
     cur.execute(
         "INSERT INTO outages(product_id,country_code,region_id,source,batch_id,started_at) "
@@ -199,6 +216,33 @@ def _pulse_history(cur, cfg, batch, product, rule=False):
             **verdicts.params(rule),
         },
     ).fetchall()
+
+
+def _failed_before(cur, batch, product, rule=False):
+    """Whether the series' previous done pulse got no success (PULSE-NODE-DNS-2: it confirms a
+    'down'): the last one before this batch's slot that had finished by its finish, with a try
+    (no_exit_answers), not mostly refused at login (proxy_login) and, with the rule, of a time
+    its country counted. A pulse that answered only "no exit" (pulse_no_exit) is a failure here:
+    it got nothing either."""
+    gone = no_exit_answers.run_sql()
+    row = cur.execute(
+        "SELECT br.successes=0 AS failed FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "LEFT JOIN test_runs r ON r.run_key=br.run_key "
+        f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
+        "WHERE b.kind='pulse' AND b.country_code=%(country)s AND b.target_id=%(target)s "
+        f"AND br.product_id=%(product)s AND br.status='done' AND br.requests-{gone}>0 "
+        f"AND {proxy_login.MEASURED_SQL} AND b.scheduled_for<%(slot)s "
+        "AND b.finished_at<=%(finished)s ORDER BY b.scheduled_for DESC LIMIT 1",
+        {
+            "country": batch["country_code"],
+            "target": batch["target_id"],
+            "product": product,
+            "slot": batch["scheduled_for"],
+            "finished": batch["finished_at"],
+            **verdicts.params(rule),
+        },
+    ).fetchone()
+    return bool(row and row["failed"])
 
 
 def _pulse_incident(cur, batch, product, now):
