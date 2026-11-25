@@ -1,6 +1,6 @@
 """`atlas daily plan|pulse-plan|pulse-hour|pulse-backfill|run|ingest|hour|check|audits|tape|
-verify-hour|droplets|image|resume-network` (operator; `hour`, `pulse-hour`, `pulse-switch`,
-`pulse-backfill`, `check` and `resume-network` on the manager).
+verify-hour|droplets|image|resume-network|reopen-outages` (operator; `hour`, `pulse-hour`,
+`pulse-switch`, `pulse-backfill`, `check`, `resume-network` and `reopen-outages` on the manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `pulse-plan` prints the
 hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they are over the
@@ -30,6 +30,8 @@ the count against `--cap`, exit 3 when one failed. `image` checks the worker ima
 code (daily.image_check: its locked dependencies and its DB-IP release's age), in the same form.
 `resume-network` resumes a network paused for a refused login (orchestrator.login_pause) once a
 small login test through its pulse config passes; it exits 3 while the test does not pass.
+`reopen-outages` undoes the outage ends of a network's latest pause (login_pause.reopen) and
+prints one JSON line.
 """
 
 from __future__ import annotations
@@ -114,6 +116,9 @@ def register(commands) -> None:
     resume.add_argument("network", help="the network paused for a refused login (fleet name)")
     resume.add_argument("--database-file", type=Path, required=True)
     resume.add_argument("--root", type=Path, help="the manager root (default $ATLAS_MANAGER_ROOT)")
+    reopen = actions.add_parser("reopen-outages", help="Manager: undo a pause's outage ends")
+    reopen.add_argument("network", help="the network as its network_paused alert names it")
+    reopen.add_argument("--database-file", type=Path, required=True)
 
 
 def _moment(value: str) -> datetime:
@@ -250,6 +255,17 @@ def _resume_network(args) -> int:
         outcome = resume(conn, places, args.network)
     print(json.dumps(outcome, separators=(",", ":")))
     return 0 if outcome["resumed"] else 3
+
+
+def _reopen_outages(args) -> int:
+    """PROXY-AUTH-PAUSE-2: one JSON line; exit 3 when the network has no pause."""
+    from ..orchestrator.login_pause import reopen
+    from ..storage import connect
+
+    with connect(args.database_file) as conn:
+        outcome = reopen(conn, args.network)
+    print(json.dumps(outcome, separators=(",", ":")))
+    return 0 if outcome["paused"] else 3
 
 
 def _pulse_backfill(args) -> int:
@@ -421,6 +437,7 @@ HANDLERS = {
     "pulse-switch": _pulse_switch,
     "pulse-backfill": _pulse_backfill,
     "resume-network": _resume_network,
+    "reopen-outages": _reopen_outages,
     "run": _run,
     "ingest": _ingest,
     "hour": _hour,

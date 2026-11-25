@@ -111,15 +111,16 @@ async def test_gateway_402_pulses_pause_the_network_as_payment_required(database
     assert message.startswith("alpha/residential: payment required. 100% of its pulse requests")
     assert "refused for payment (HTTP 402)" in message
     done = await login_pause.login_pause(db, places.root, NOW)
-    assert done == {"paused": ["alpha"], "nothing_to_pause": []}
+    assert done == {"paused": ["alpha"], "nothing_to_pause": [], "outages_ended": 0}
     assert state(places) == (False, False, False)
     ((severity, acknowledged, data, message),) = query(database, PAUSES)
     assert (severity, acknowledged, data["reason"]) == ("major", False, "payment required")
     assert (data["payment"], data["refused"], data["requests"]) == (200, 200, 200)
     assert message == (
         "alpha: payment required. The gateway refuses our account for payment (HTTP 402 on 200 "
-        "of 200 requests since 12:00 UTC). Its tests are paused. Top up or renew the account, "
-        "then resume after a one-request login test passes."
+        "of 200 requests since 12:00 UTC). Its tests are paused and its open outages end, not "
+        "measured, at 12:00 UTC. Top up or renew the account, then resume after a one-request "
+        "login test passes."
     )
     # The resume stays refused while the gateway answers 402.
     login = (await refused_402(tmp_path, "generic_https", "https://localhost:9/", 5)).to_dict()

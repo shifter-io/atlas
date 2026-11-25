@@ -135,6 +135,7 @@ async def test_gateway_401_pulses_pause_the_network_and_open_no_outage(database,
     assert await login_pause.login_pause(db, places.root, NOW) == {
         "paused": ["alpha"],
         "nothing_to_pause": [],
+        "outages_ended": 0,
     }
     assert state(places) == (False, False, False)
     ((severity, acknowledged, data, message),) = query(database, PAUSES)
