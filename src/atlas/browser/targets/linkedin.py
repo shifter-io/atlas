@@ -24,7 +24,8 @@ class LinkedinPublic(PageTarget):
     id: str = LINKEDIN_PUBLIC
     url: str = "https://www.linkedin.com/in/"
     # 2: the try also stops waiting at the authwall's heading (AUTHWALL); same pass rule.
-    version: str = "2"
+    # 3: the profile address has no trailing slash (see address()); same pass rule.
+    version: str = "3"
 
     NAME = "h1.top-card-layout__title"
     HEADLINE = ".top-card-layout__headline"
@@ -52,7 +53,10 @@ class LinkedinPublic(PageTarget):
     BLOCK_STATUSES = frozenset({999})
 
     def address(self, value: Any) -> str:
-        return f"{self.url}{quote(value, safe='')}/"
+        """The profile's own address, /in/<name> without a trailing slash: LinkedIn answers
+        /in/<name>/ with a redirect there that sets tracking cookies, and walls most such
+        redirected visits (login_wall) whatever the network (LINKEDIN-SLASH-1)."""
+        return f"{self.url}{quote(value, safe='')}"
 
     def wanted(self, value: Any) -> tuple[str, ...]:
         return (self.NAME, self.HEADLINE, self.AUTHWALL)

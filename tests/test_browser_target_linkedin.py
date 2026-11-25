@@ -50,8 +50,10 @@ def test_fixture_counts_exactly_the_selectors_the_target_waits_for(path):
     check_fixture_counts(path)
 
 
-def test_page_url():
-    assert url(c.LINKEDIN_PUBLIC, "example-person") == "https://www.linkedin.com/in/example-person/"
+def test_page_url_has_no_trailing_slash():
+    """LinkedIn redirects /in/<name>/ to /in/<name> and walls most redirected visits."""
+    assert url(c.LINKEDIN_PUBLIC, "example-person") == "https://www.linkedin.com/in/example-person"
+    assert url(c.LINKEDIN_PUBLIC, "a/b c") == "https://www.linkedin.com/in/a%2Fb%20c"
 
 
 @pytest.mark.parametrize("slug", ["loginov-example", "signup-example", "uas", "authwall-a"])
