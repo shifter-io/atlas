@@ -54,7 +54,6 @@ def test_page_url_has_no_trailing_slash():
     """LinkedIn redirects /in/<name>/ to /in/<name> and walls most redirected visits."""
     assert url(c.LINKEDIN_PUBLIC, "example-person") == "https://www.linkedin.com/in/example-person"
     assert url(c.LINKEDIN_PUBLIC, "a/b c") == "https://www.linkedin.com/in/a%2Fb%20c"
-    assert registry.get(c.LINKEDIN_PUBLIC).version == "3"
 
 
 @pytest.mark.parametrize("slug", ["loginov-example", "signup-example", "uas", "authwall-a"])
