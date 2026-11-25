@@ -77,7 +77,7 @@ async def paused(database, db, tmp_path):
 
 async def test_407_in_two_regions_pauses_the_three_parts_and_posts_once(database, db, tmp_path):
     places, alpha, done = await paused(database, db, tmp_path)
-    assert done == {"paused": ["alpha"], "nothing_to_pause": []}
+    assert done == {"paused": ["alpha"], "nothing_to_pause": [], "outages_ended": 0}
     assert state(places) == (False, False, False)
     assert state(places, "beta")[:2] == (True, True)  # beta is not touched
     held = json.loads(places.held.read_text())
@@ -101,8 +101,9 @@ async def test_407_in_two_regions_pauses_the_three_parts_and_posts_once(database
     assert data["paused"] == ["pulses", "daily", "browser"] and data["problems"] == []
     assert message == (
         "alpha: the account credentials no longer work, or the account is refused the IP-check "
-        "host (HTTP 401, 403 or 407 on 200 of 200 requests since 12:00 UTC). Its tests are paused. "
-        "Resume after a one-request login test passes."
+        "host (HTTP 401, 403 or 407 on 200 of 200 requests since 12:00 UTC). Its tests are paused "
+        "and its open outages end, not measured, at 12:00 UTC. Resume after a one-request login "
+        "test passes."
     )
     assert query(database, TRIGGERS) == [(True,)]  # the pause stands for the trigger
 
@@ -115,6 +116,7 @@ async def test_below_the_share_nothing_is_paused(database, db, tmp_path):
     assert await login_pause.login_pause(db, places.root, NOW) == {
         "paused": [],
         "nothing_to_pause": [],
+        "outages_ended": 0,
     }
     assert state(places) == (True, True, True)
     assert query(database, PAUSES) == []
@@ -126,6 +128,7 @@ async def test_an_already_paused_network_posts_nothing_more(database, db, tmp_pa
     assert await login_pause.login_pause(db, places.root, NOW + timedelta(hours=1)) == {
         "paused": [],
         "nothing_to_pause": [],
+        "outages_ended": 0,
     }
     assert len(query(database, PAUSES)) == 1
     assert query(database, TRIGGERS) == [(True,), (True,)]
@@ -149,7 +152,7 @@ async def test_a_mostly_refused_browser_run_triggers_and_a_network_without_parts
         made = batch(conn, "browser", NOW - timedelta(minutes=30), target="x_web")
         batch_run(conn, made, alpha, NOW - timedelta(minutes=20), run_key=key, requests=10)
     done = await login_pause.login_pause(db, places.root, NOW)
-    assert done == {"paused": [], "nothing_to_pause": [alpha]}
+    assert done == {"paused": [], "nothing_to_pause": [alpha], "outages_ended": 0}
     assert query(database, PAUSES) == []
 
 

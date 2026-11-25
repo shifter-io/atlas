@@ -18,6 +18,16 @@ it is. `atlas daily resume-network` (resume) runs a login test first, puts the p
 acknowledges the pause and posts network_resumed. The hour report lists the paused networks on
 its "expected" line (paused_line), never as a failure.
 
+PROXY-AUTH-PAUSE-2 (#1413): a paused network is not measured, so no verdict would end its open
+outages and each would count to the end of every window. Each tick therefore ends every open
+outage of a network with an open pause (all sources: per-country and network-wide pulse, census)
+at the pause's `since`, the first refused request its triggers saw, never before the outage's own
+start: one opened by a partly refused pulse ends at its start and adds no downtime. The end_reason
+is 'not_measured' (pulse_unmeasured.END_REASON), with no tape event; the pause's data lists the
+ends in `closed_outages`. Pulses of the pause's hour still running are covered too. Undo:
+`atlas daily reopen-outages <network>` (reopen) reopens them and marks the pause `outages_kept`,
+after which its ticks end none.
+
 PAUSE-402-1: a network whose refused requests were mostly refused for payment (HTTP 402: our
 account's balance or plan, proxy_login.payment) is paused the same way, with the reason
 PAYMENT_REASON and PAYMENT_MESSAGE ("payment required"), so the page says what to fix.
@@ -37,6 +47,7 @@ from .. import netpause, proxy_login
 from .db import Database, setting
 from .events import raise_alert
 from .pulse_login import KIND as TRIGGER
+from .pulse_unmeasured import END_REASON
 
 KIND = "network_paused"
 RESUMED = "network_resumed"
@@ -46,12 +57,14 @@ BROWSER_WINDOW = timedelta(hours=1)
 MESSAGE = (
     "{network}: the account credentials no longer work, or the account is refused the IP-check "
     "host (HTTP 401, 403 or 407 on {refused} of {requests} requests since {since:%H:%M} UTC). "
-    "Its tests are paused. Resume after a one-request login test passes."
+    "Its tests are paused and its open outages end, not measured, at {since:%H:%M} UTC. Resume "
+    "after a one-request login test passes."
 )
 PAYMENT_MESSAGE = (
     "{network}: payment required. The gateway refuses our account for payment (HTTP 402 on "
-    "{payment} of {requests} requests since {since:%H:%M} UTC). Its tests are paused. Top up or "
-    "renew the account, then resume after a one-request login test passes."
+    "{payment} of {requests} requests since {since:%H:%M} UTC). Its tests are paused and its "
+    "open outages end, not measured, at {since:%H:%M} UTC. Top up or renew the account, then "
+    "resume after a one-request login test passes."
 )
 _PAUSED = f"SELECT data FROM alerts WHERE kind='{KIND}' AND acknowledged_at IS NULL"
 # The network's last resume: a trigger counts only for refusals after it (the runs of the hour of
@@ -80,6 +93,29 @@ CLEAR_SQL = (
     "UPDATE alerts SET acknowledged_at=now() WHERE kind=ANY(%s) AND acknowledged_at IS NULL "
     "AND data->>'product_id'=%s"
 )
+# Every open outage of a network under an open pause that keeps its outages' ends.
+END_SQL = (
+    "UPDATE outages o SET ended_at=greatest(o.started_at,(a.data->>'since')::timestamptz),"
+    "end_reason=%(reason)s FROM alerts a WHERE a.kind=%(kind)s AND a.acknowledged_at IS NULL "
+    "AND NOT a.data ? 'outages_kept' AND (a.data->>'product_id')::int=o.product_id "
+    "AND o.ended_at IS NULL RETURNING a.alert_id,o.outage_id"
+)
+LIST_SQL = (
+    "UPDATE alerts SET data=jsonb_set(data,'{closed_outages}',"
+    "coalesce(data->'closed_outages','[]')||%s) WHERE alert_id=%s"
+)
+LATEST_SQL = (
+    f"SELECT alert_id,data FROM alerts WHERE kind='{KIND}' AND data->>'network'=%s "
+    "ORDER BY first_at DESC,alert_id DESC LIMIT 1"
+)
+# The pause's ended outages, unless another closer ended them or one is open in their country.
+REOPEN_SQL = (
+    "UPDATE outages o SET ended_at=NULL,end_reason=NULL WHERE o.outage_id=ANY(%s) "
+    "AND o.end_reason=%s AND NOT EXISTS (SELECT 1 FROM outages x WHERE "
+    "x.product_id=o.product_id AND x.country_code=o.country_code AND x.ended_at IS NULL) "
+    "RETURNING o.outage_id"
+)
+KEEP_SQL = "UPDATE alerts SET data=data||'{\"outages_kept\":true}' WHERE alert_id=%s"
 RESUMED_SQL = (
     "INSERT INTO alerts(kind,severity,message,data,dedupe_key,acknowledged_at) "
     "VALUES (%s,'major',%s,%s,%s,now())"
@@ -110,7 +146,7 @@ async def login_pause(db: Database, root: Path, now: datetime | None = None) -> 
         }
         browser = await setting(conn, "browser.settings_file")
     places = netpause.Places(root, Path(browser) if browser else None)
-    done: dict[str, list] = {"paused": [], "nothing_to_pause": []}
+    done: dict[str, Any] = {"paused": [], "nothing_to_pause": []}
     for product, trigger in triggers.items():
         async with db.transaction() as conn:
             network = await _pause(conn, places, product, trigger | {"now": now}, product in paused)
@@ -118,7 +154,21 @@ async def login_pause(db: Database, root: Path, now: datetime | None = None) -> 
             done["nothing_to_pause"].append(product)
         elif product not in paused:
             done["paused"].append(network)
+    async with db.transaction() as conn:
+        done["outages_ended"] = await end_outages(conn)
     return done
+
+
+async def end_outages(conn) -> int:
+    """End the open outages of every paused network (PROXY-AUTH-PAUSE-2, module docstring) and
+    list them on its pause; returns how many. Idempotent."""
+    rows = await (await conn.execute(END_SQL, {"reason": END_REASON, "kind": KIND})).fetchall()
+    ended: dict[int, list[int]] = {}
+    for row in rows:
+        ended.setdefault(row["alert_id"], []).append(row["outage_id"])
+    for alert, outages in ended.items():
+        await conn.execute(LIST_SQL, (Jsonb(sorted(outages)), alert))
+    return len(rows)
 
 
 async def _pause(conn, places: netpause.Places, product: int, trigger: dict, paused: bool):
@@ -202,6 +252,22 @@ def resume(conn: psycopg.Connection, places: netpause.Places, network: str, test
         conn.execute(RESUMED_SQL, (RESUMED, message, data, key))
     done = {"network": network, "resumed": True, "posted": bool(was or moved), "login": login}
     return done | {"restored": restored} | ({"problems": problems} if problems else {})
+
+
+def reopen(conn: psycopg.Connection, network: str) -> dict[str, Any]:
+    """`atlas daily reopen-outages`: undo PROXY-AUTH-PAUSE-2 for the network's latest pause
+    (`network`: the name its alert gives): reopen the outages it ended (those another closer
+    ended since, or whose country has an open outage, stay as they are) and mark the pause
+    `outages_kept`, so its ticks end none. A network never paused reopens nothing."""
+    row = conn.execute(LATEST_SQL, (network,)).fetchone()
+    if row is None:
+        return {"network": network, "paused": False, "reopened": []}
+    alert, data = row
+    listed = data.get("closed_outages") or []
+    reopened = [r[0] for r in conn.execute(REOPEN_SQL, (listed, END_REASON)).fetchall()]
+    conn.execute(KEEP_SQL, (alert,))
+    done = {"network": network, "paused": True, "reopened": sorted(reopened)}
+    return done | {"kept": sorted(set(listed) - set(reopened))}
 
 
 def paused_line(cur) -> str:
