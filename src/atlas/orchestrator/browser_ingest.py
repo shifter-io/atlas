@@ -45,6 +45,7 @@ from . import nodework
 from .api import (
     DB_KEY,
     NODE_KEY,
+    _busy,
     _check_sha256,
     _error,
     _ingest,
@@ -120,16 +121,6 @@ class LocalArchive:
             partial.replace(destination)
 
     put_verified = Spaces.put_verified
-
-
-def _busy(
-    retry_after: int, message: str, status: type[web.HTTPException] = web.HTTPTooManyRequests
-) -> web.HTTPException:
-    return status(
-        text=json.dumps({"error": message}),
-        content_type="application/json",
-        headers={"Retry-After": str(retry_after)},
-    )
 
 
 def _unavailable(message: str) -> web.HTTPException:

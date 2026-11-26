@@ -266,7 +266,7 @@ def _begin(conn, pipeline, runs):
     found = conn.execute(
         "SELECT n FROM unnest(%s::text[]) n WHERE to_regclass(n) IS NOT NULL", (names,)
     )
-    pipeline.sync()
+    storage_batch.sync(conn, pipeline)
     if version.fetchone()[0] != SCHEMA_VERSION:
         raise ValueError("Database schema requires db-migrate or a rebuild before import")
     return stored.fetchall(), {n for (n,) in found}
@@ -290,7 +290,7 @@ def _create_partitions_as_owner(conn, pipeline, missing, owner_file):
     import whose own login may only add rows (SEC-INGEST-ROLE-1): the import's transaction ends
     first, so the exclusive lock never waits for its shared one."""
     conn.execute("ROLLBACK")
-    pipeline.sync()
+    storage_batch.sync(conn, pipeline)
     with connect(owner_file) as owner:
         owner.autocommit = True  # _create_partitions' BEGIN and COMMIT
         _create_partitions(owner, missing)
@@ -315,7 +315,7 @@ def _store(runs, conn, partitions_file=None):
             stored, existing = _begin(conn, pipeline, runs)
         fresh = storage_batch.existing(runs, stored)
         summaries, scopes, new_ips, enriched, counted = _store_runs(conn, runs, fresh, existing)
-        pipeline.sync()
+        storage_batch.sync(conn, pipeline)
         for idx, run_key, summary in summaries.fetchall():
             storage_ingest.check_stored(runs[idx], summary)
             runs[idx].run_key = run_key
@@ -347,8 +347,8 @@ def _read_all(directories, batch_ids, ip_rows, counters=False):
     return [_read(n, directory, batch_id, ip_rows, counters) for n, (directory, batch_id) in pairs]
 
 
-def _connected(runs, credentials_file, partitions_file=None):
-    with connect(credentials_file) as conn:
+def _connected(runs, credentials_file, partitions_file=None, settings=()):
+    with connect(credentials_file, *settings) as conn:
         return _store(runs, conn, partitions_file)
 
 
@@ -379,6 +379,7 @@ def ingest(
     ip_rows=True,
     counters=False,
     partitions_file=None,
+    lock_wait=None,
 ):
     """Import one finished run directory; replaying the same artifacts is a no-op.
 
@@ -391,11 +392,14 @@ def ingest(
     A census may have requested=null (unbounded); geo.jsonl.gz, if listed, fills run_geo_buckets.
     partitions_file is the login that owns the partitions, for a credentials_file whose login
     may only add rows (the upload path's, SEC-INGEST-ROLE-1): a missing day's partitions are
-    created over it.
+    created over it. lock_wait (a PostgreSQL interval, "60s") bounds each lock wait of the import:
+    past it psycopg.errors.LockNotAvailable, an OperationalError, and nothing is stored (the
+    upload path's, INGEST-HANG-1: an import holding a network's locks never parks every upload).
     It is ingest_many of one directory, raising the run's own error, not IngestBatchError.
     """
     runs = _read_all([directory], [batch_id], ip_rows, counters)
-    return _connected(runs, credentials_file, partitions_file)[0]
+    settings = () if lock_wait is None else (f"lock_timeout={lock_wait}",)
+    return _connected(runs, credentials_file, partitions_file, settings)[0]
 
 
 def _add_addresses(conn, stored, counters):

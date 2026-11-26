@@ -100,8 +100,9 @@ NETWORK_FIELDS = ("isp", "organization", "asn", "asn_organization", "connection_
 CLIENT_CHECK = "client_connection_check_interval=10s"
 
 
-def connect(credentials_file):
-    options = session_options(CLIENT_CHECK)
+def connect(credentials_file, *settings):
+    """A session of the file's login with session_options() and then settings ("name=value")."""
+    options = session_options(CLIENT_CHECK, *settings)
     return psycopg.connect(**connect_options(credentials_file), **options, connect_timeout=5)
 
 

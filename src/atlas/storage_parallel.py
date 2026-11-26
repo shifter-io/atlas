@@ -24,6 +24,14 @@ Bounds: N (default sized to the machine, atlas/sizing.py) is capped to the free 
 never split: N goes down instead, and the groups in flight over all lanes never take more than
 the budget); the N used is printed. connections=1 stores the groups one after the other on one
 connection, with the statements of ingest_many and estimate_runs.
+
+INGEST-HANG-1 (26 Nov 2026: a group's session waited hours on its own client, holding its
+networks' locks, and every upload of those networks waited behind it): a group still running
+DEADLINE seconds after it was handed out has its worker process killed, which ends its sessions
+(their locks go) and fails that process's groups, named, while the other lanes go on; the lane
+is not replaced. Each worker session also ends itself, on the server, when one transaction
+passes SESSION's transaction_timeout or sits idle in one past its idle timeout: the bound of a
+thread lane (P = 1), which cannot be killed.
 """
 
 from __future__ import annotations
@@ -50,6 +58,10 @@ EXPANSION = 20  # bytes in memory per byte of a run directory's files while it i
 TRANSIENT = (psycopg.errors.DeadlockDetected, psycopg.errors.SerializationFailure)
 ERRORS = (storage.IngestBatchError, OSError, KeyError, ValueError, ZeroDivisionError)
 ERRORS += (psycopg.Error,)
+# The 1,523 groups of 19-26 Nov 2026 in production took 6.6 s (median) to 143 s (the longest
+# that did not hang): far below both bounds.
+DEADLINE = 900.0  # seconds
+SESSION = ("transaction_timeout=10min", "idle_in_transaction_session_timeout=5min")
 
 
 @dataclass
@@ -101,7 +113,7 @@ class Connections:
     def get(self):
         conn = getattr(self.local, "conn", None)
         if conn is None:
-            conn = self.local.conn = storage.connect(self.credentials)
+            conn = self.local.conn = storage.connect(self.credentials, *SESSION)
             with self.lock:
                 self.opened.append(conn)
         return conn
@@ -317,7 +329,7 @@ class Pool:
             shares = [n // lanes + (k < n % lanes) for k in range(lanes)]
             self.lanes = [ProcessLane(credentials_file, share, self.events) for share in shares]
         self.tickets, self.parts, self.sizes, self.pending, self.running = {}, {}, {}, [], {}
-        self.loaded, self.closing = 0, False
+        self.loaded, self.closing, self.deadline, self.started = 0, False, DEADLINE, {}
         self.thread = threading.Thread(target=self._dispatch, daemon=True)
         self.thread.start()
 
@@ -364,7 +376,12 @@ class Pool:
         try:
             while not self.closing or self.running:
                 self._hand_out()
-                self._handle(*self.events.get())
+                try:
+                    event = self.events.get(timeout=self._patience())
+                except queue.Empty:
+                    self._overdue()
+                    continue
+                self._handle(*event)
         finally:  # closed, or broken: no ticket is left unresolved
             for key in [*self.pending, *self.running]:
                 if not self.tickets[key].cancel() and not self.tickets[key].done():
@@ -398,9 +415,31 @@ class Pool:
             lane = min(free, key=lambda lane: len(lane.running) / lane.capacity)
             self.pending.remove(key)
             self.running[key], self.loaded = lane, self.loaded + self.sizes[key]
+            self.started[key] = time.monotonic()
             lane.send(key, self.parts[key])
 
+    def _patience(self) -> float | None:
+        """Seconds until the first group in flight passes the deadline; None: none in flight."""
+        if not self.started:
+            return None
+        return max(0.0, min(self.started.values()) + self.deadline - time.monotonic())
+
+    def _overdue(self) -> None:
+        """Each group past the deadline, named; its worker process killed (its "dead" event then
+        fails its groups). A thread lane's group is left to its session's own timeouts."""
+        now = time.monotonic()
+        for key in [k for k, began in self.started.items() if now - began >= self.deadline]:
+            del self.started[key]
+            lane, names = self.running[key], self.parts[key].run_ids()
+            print(
+                f"storage_parallel: a group passed its deadline ({self.deadline:.0f} s): {names}",
+                file=sys.stderr,
+            )
+            if isinstance(lane, ProcessLane):
+                lane.process.kill()
+
     def _done(self, key, future: Future) -> None:
+        self.started.pop(key, None)
         self.running.pop(key).running.discard(key)
         self.loaded -= self.sizes.pop(key)
         self.parts.pop(key)
@@ -444,7 +483,8 @@ def store(
     """Store the groups (Group) over `connections` connections in `processes` processes (None:
     sized to the machine, sizing.derived), or with an open `pool`; each one's Outcome.
 
-    on_commit(group, outcome) runs in this thread as each committed group finishes. A stop
+    on_commit(group, outcome) runs in this thread as each committed group finishes; a group
+    running past DEADLINE seconds has its worker process killed (Pool). A stop
     (KeyboardInterrupt) hands out no more groups and waits for those in flight.
     """
     connections = _sized("connections", connections)

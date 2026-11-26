@@ -137,6 +137,10 @@ DEFAULTS: dict[str, Any] = {
     # (400) before any artifact is read.
     "results.max_artifact_rows": 5_000_000,
     "results.upload_timeout_seconds": 600,
+    # Census and pulse uploads received and imported at once by this process; the next is 503
+    # with Retry-After before its body is read (INGEST-HANG-1). The healthy peak of 25 Nov 2026
+    # was a few hundred (380 answered in one second); 26 Nov's blocked imports left 16,000.
+    "results.ingest_concurrency": 2000,
     # The planner switches: when off, census_plan / pulse_plan record 'skipped' and plan nothing.
     "scheduler.census_enabled": True,
     "scheduler.pulse_enabled": True,

@@ -52,6 +52,16 @@ log = logging.getLogger(__name__)
 
 ProxyFactory = Callable[[str], ProxySource]
 UPLOAD_ATTEMPTS = 8
+RETRY_AFTER_MAX = 300.0  # seconds: the longest Retry-After an upload waits
+
+
+def _retry_after(exc: BaseException) -> float:
+    """A refused upload's Retry-After in seconds (503 ingest_busy, INGEST-HANG-1), else 0."""
+    headers = exc.headers if isinstance(exc, aiohttp.ClientResponseError) else None
+    try:
+        return min(float((headers or {}).get("Retry-After", 0)), RETRY_AFTER_MAX)
+    except ValueError:
+        return 0.0
 
 
 def read_token(path: str | Path) -> str:
@@ -601,7 +611,8 @@ class NodeAgent:
             log.warning("could not report batch %s failed (%s)", batch_id, type(exc).__name__)
 
     async def upload(self, batch_id: int, directory: Path) -> dict[str, Any]:
-        """POST the run directory as tar.gz, retrying transient failures with backoff."""
+        """POST the run directory as tar.gz, retrying transient failures with backoff (or the
+        orchestrator's longer Retry-After)."""
         with tempfile.TemporaryDirectory(prefix="atlas-node-") as temporary:
             archive = await asyncio.to_thread(pack, directory, Path(temporary) / "run.tar.gz")
             for attempt in range(UPLOAD_ATTEMPTS):
@@ -617,6 +628,7 @@ class NodeAgent:
                     )
                 except (aiohttp.ClientError, OSError, TimeoutError) as exc:
                     delay = self.upload_backoff * 2**attempt * (1 + random.random() / 4)
+                    delay = max(delay, _retry_after(exc))
                     log.warning(
                         "upload of batch %s failed (%s); retry in %.0fs",
                         batch_id,

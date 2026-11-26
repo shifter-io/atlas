@@ -1,13 +1,16 @@
 """storage.ingest_many's session temp tables: each holds the rows of every run of a batch with
 the run's index in it (idx), and is dropped at commit. A multi-row statement carries as many rows
 as PostgreSQL's PARAMETERS allow; all go in pipeline mode, so filling the tables costs no round
-trip."""
+trip.
+
+INGEST-HANG-1: every round trip ends with sync() below, never the pipeline's own sync()."""
 
 from __future__ import annotations
 
 import uuid
 
 from psycopg import RawCursor
+from psycopg.generators import send
 
 from .storage_read import OUTCOME_KEYS
 
@@ -58,6 +61,18 @@ SCOPES = (
     "SELECT r.idx,s.scope_id,s.metrics,s.histogram_steps,s.histogram_counts FROM incoming_runs r "
     "JOIN scope_stats s USING(scope_id) ORDER BY r.idx"
 )
+
+
+def sync(conn, pipeline) -> None:
+    """pipeline.sync() once every queued statement is on the wire. psycopg's own (3.3) may stop
+    sending with the end of a large statement still in libpq's buffer, then only wait to read;
+    the server answers nothing before the rest and the Sync, so both wait for ever, the
+    transaction's locks held (26 Nov 2026: hours, every upload of its networks behind them).
+    Sending it all first, reading what the server sends meanwhile, leaves the Sync's 5 bytes,
+    which the pipeline's sync always sends before it waits."""
+    with conn.lock:
+        conn.wait(send(conn.pgconn))
+    pipeline.sync()
 
 
 def load(conn, rows):
