@@ -40,7 +40,9 @@ Paths are relative to the root. The on-demand hour (pulse_ondemand.py) runs the 
 `cells` set: only the hour's (network, region) nodes, with the hour's own ledger. The ledger
 `nodes.json` holds names, ids and states only; addresses stay in memory and tokens only in the
 stdin tar. A `create_failed` node records why (`create_failure`): DigitalOcean's error id as
-`error_class` and its message in `error_detail`, also logged as one line per region.
+`error_class` and its message in `error_detail`, also logged as one line per region. A start
+whose SSH failed is confirmed by the node's heartbeat, else retried once (pulse_start,
+PULSE-ARM-1); a node so armed records how in `error_detail` (`start`).
 """
 
 from __future__ import annotations
@@ -62,7 +64,7 @@ from ..errors import UserError
 from ..node_tls import client_tls
 from ..onboarding.files import atomic_json, lock
 from ..onboarding.scheduler import Clock
-from . import pulse_adopt, scope
+from . import pulse_adopt, pulse_start, scope
 from .contracts import (
     ACCOUNTS,
     NETWORK_RE,
@@ -266,12 +268,13 @@ def _now() -> str:
 
 @dataclass(frozen=True)
 class FleetClients:
-    """The cloud, SSH remote, node-token issuer and clock of one reconcile pass."""
+    """The cloud, SSH remote, node-token issuer, clock and heartbeat reader of one pass."""
 
     cloud: Any
     remote: Any
     issuer: Issuer
     clock: Clock
+    beats: pulse_start.Beats | None = None  # the hour's orchestrator database (pulse_replace)
 
 
 class Fleet:
@@ -280,7 +283,7 @@ class Fleet:
     def __init__(self, root: Path, config: FleetConfig, clients: FleetClients):
         self.root, self.config = root, config
         self.cloud, self.remote = clients.cloud, clients.remote
-        self.issuer, self.clock = clients.issuer, clients.clock
+        self.issuer, self.clock, self.beats = clients.issuer, clients.clock, clients.beats
         self.records = load_nodes(root)
         self.report: dict[str, list] = {
             k: [] for k in ("created", "present", "unknown", "failed", "destroy_refused")
@@ -441,9 +444,12 @@ class Fleet:
                             record.error_detail["reason"])  # fmt: skip
                 return
             record.status, record.ssh_ready_at = "starting", _now()
-            payload = await self._bundle(record)
-            await self.remote.push_start(droplet, payload, NODE_COMMAND)
+            payload, node_id, since = await self._bundle(record)
+            start = pulse_start.Start(droplet, payload, NODE_COMMAND, node_id, since)
+            how = await pulse_start.push_start(self.remote, self.clock, self.beats, start)
             record.status, record.armed_at, record.error_class = "armed", _now(), None
+            if how:
+                record.error_detail = {"start": how}
         except Exception as error:  # boundary: per-node isolation; type and scrubbed detail kept
             record.status, record.error_class = "start_failed", type(error).__name__
             record.error_detail = scope.error_detail(self.cloud, [record.droplet_id], error)
@@ -461,8 +467,9 @@ class Fleet:
                 return None
             await self.clock.sleep(READY_POLL_SECONDS)
 
-    async def _bundle(self, record: DropletRecord) -> bytes:
-        """One tar: the node's settings, provider config, wheel, credentials and a new token."""
+    async def _bundle(self, record: DropletRecord) -> tuple[bytes, int | None, datetime]:
+        """One tar: the node's settings, provider config, wheel, credentials and a new token;
+        the token's node row, and when it was rotated (a heartbeat after is this droplet's)."""
         network = self.config.networks[record.network]
         issued = await asyncio.to_thread(
             self.issuer,
@@ -471,6 +478,7 @@ class Fleet:
             product=network.product,
             region=record.region,
         )
+        rotated = datetime.now(UTC)  # the old token is refused from now on
         node = {
             "orchestrator": self.config.orchestrator_url,
             "provider": network.provider,
@@ -497,7 +505,7 @@ class Fleet:
                 info = tarfile.TarInfo(name)
                 info.size, info.mode, info.mtime = len(data), 0o600, int(self.clock.now())
                 archive.addfile(info, io.BytesIO(data))
-        return buffer.getvalue()
+        return buffer.getvalue(), issued.get("node_id"), rotated
 
     def _sort(self, wanted: set[str]) -> None:
         lost = {item["name"] for item in self.report["failed"]}  # exists, but not under the tag
