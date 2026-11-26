@@ -30,7 +30,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from .. import partitions
-from ..providers.dbconnect import connect_options
+from ..providers.dbconnect import connect_options, session_options
 
 log = logging.getLogger(__name__)
 
@@ -231,7 +231,11 @@ class Database:
 
     async def _open(self) -> psycopg.AsyncConnection:
         return await psycopg.AsyncConnection.connect(
-            **self._credentials, autocommit=True, connect_timeout=5, row_factory=dict_row
+            **self._credentials,
+            **session_options(),  # CALC-STALE-SESSION-1: keepalives (dbconnect.py)
+            autocommit=True,
+            connect_timeout=5,
+            row_factory=dict_row,
         )
 
     @contextlib.asynccontextmanager

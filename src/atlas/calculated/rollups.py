@@ -41,7 +41,7 @@ from psycopg.types.json import Jsonb
 
 from .. import no_exit_answers, verdicts
 from ..storage import connect
-from . import rollup_days, scheduled
+from . import rollup_days, run_lock, scheduled
 from .aggregate import census_overlaps
 from .bins import Bins
 from .browser import NOT_BROWSER
@@ -438,13 +438,13 @@ def fill(database, as_of, rule=False):
     for lo, hi in _ranges(stale):
         with connect(database) as conn:
             conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-            conn.execute(f"SELECT pg_advisory_xact_lock({LOCK})")
+            run_lock.wait(conn, LOCK)
             span = [lo + n * HOUR for n in range((hi - lo) // HOUR)]
             newest = _marks(conn, span, "calculated_geo_rollups")["newest"]
             _count(conn, lo, hi, rule)
             conn.execute(MARK, (span, newest))
     with connect(database) as conn:  # the whole days, committed for the build (rollup_days.py)
-        conn.execute(f"SELECT pg_advisory_xact_lock({LOCK})")
+        run_lock.wait(conn, LOCK)
         rollup_days.write(conn, hours)
     return stale
 
@@ -464,7 +464,7 @@ def _ruled(conn, rule):
     found = conn.cursor(row_factory=tuple_row).execute(RULED, (RULE,)).fetchone()
     if verdicts.same(found and found[0], rule):
         return
-    conn.execute(f"SELECT pg_advisory_xact_lock({LOCK})")
+    run_lock.wait(conn, LOCK)
     conn.execute("DELETE FROM calculated_geo_hours")
     conn.execute("DELETE FROM calculated_geo_rollups")
     rollup_days.forget_all(conn)
