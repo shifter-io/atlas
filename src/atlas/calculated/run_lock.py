@@ -50,7 +50,7 @@ def wait(conn, key: int) -> None:
     Only this wait is bounded: the transaction's lock_timeout is the session's again after it."""
     conn.execute(f"SET LOCAL lock_timeout = '{WAIT}'")  # takes no snapshot, unlike a SELECT
     try:
-        conn.execute("SELECT pg_advisory_xact_lock(%s)", (key,))
+        conn.execute(f"SELECT pg_advisory_xact_lock({int(key)})")  # the statement as before
     except psycopg.errors.LockNotAvailable:
         raise LockWaitTimeout(
             f"waited {WAIT} for the calculation's database lock {key}: another session holds "
