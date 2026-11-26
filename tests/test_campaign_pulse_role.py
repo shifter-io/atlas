@@ -232,17 +232,43 @@ async def test_a_pulse_assignment_into_a_project_not_named_dev_resources_is_refu
     assert rid in fake.projects[PROD_PROJECT] and not fake.deleted
 
 
-async def test_an_unassigned_pulse_node_is_never_deleted_even_inside_dev_resources(tmp_path):
+@pytest.mark.parametrize(
+    "late_membership, requested",
+    [
+        (False, "2027-01-01T21:58:00+00:00"),
+        (False, "2027-01-01T21:58:00"),  # naive: read as UTC
+        (True, "2027-01-01T21:58:00+00:00"),
+    ],
+)
+async def test_an_unassigned_pulse_node_of_our_own_create_is_removed(
+    tmp_path, late_membership, requested
+):
+    """PULSE-TEARDOWN-1: in or out of Dev Resources (the membership showing only after the
+    assignment gave up), our own unconfirmed pulse node goes through the guard at once."""
     fake, *_ = world()
     async with running(fake) as cloud:
         rid, records = await created_pulse_node(cloud)
-        fake.move(rid, DEV_PROJECT)  # the membership shows only after the assign gave up
+        records[rid].requested_at = requested  # the create's request
+        if late_membership:
+            fake.move(rid, DEV_PROJECT)
         await remove_unassigned(
             cloud, pulse_scope(DEV_PROJECT), records, tmp_path / "a", {rid: {}}, "pulse"
         )
-    assert records[rid].status == "destroy_refused" and records[rid].assign_failed_at
-    assert rid in fake.droplets and not fake.deleted
-    assert not [r for r in fake.requests if r[0] == "DELETE"]
+    assert records[rid].status == "destroyed" and records[rid].assign_failed_at
+    assert fake.deleted == [("droplet", rid)]
+    [*_, last] = [json.loads(line) for line in (tmp_path / "a").read_text().splitlines()]
+    assert last["path"] == ("normal" if late_membership else "own_unassigned")
+
+
+async def test_an_unassigned_pulse_node_without_its_request_time_is_refused(tmp_path):
+    fake, *_ = world()
+    async with running(fake) as cloud:
+        rid, records = await created_pulse_node(cloud)  # no requested_at: nothing proves it
+        await remove_unassigned(
+            cloud, pulse_scope(DEV_PROJECT), records, tmp_path / "a", {rid: {}}, "pulse"
+        )
+    assert records[rid].status == "destroy_refused" and rid in fake.droplets
+    assert not fake.deleted
 
 
 @pytest.mark.parametrize("role, use_pulse_scope", [("pulse", False), ("worker", True)])

@@ -285,24 +285,28 @@ async def test_a_droplet_that_never_becomes_active_fails_its_boot(tmp_path):
     assert not remote.pushed and not issuer.calls
 
 
-async def test_an_unconfirmed_assignment_ends_destroy_refused_and_is_never_armed(tmp_path):
+async def test_an_unconfirmed_assignment_is_removed_on_the_own_unassigned_path(tmp_path):
+    """PULSE-TEARDOWN-1: on 2026-11-23 such a node was left up (destroy_refused) and held the
+    next hour's cap; it is removed at once now, never armed."""
     root = make_root(tmp_path)
     fake, (remote, issuer, clock) = world(), services()
     fake.faults.append(Fault("POST", f"/v2/projects/{DEV}/resources", 500, times=10**6))
     report = await reconcile(fake, root, remote, issuer, clock)
-    [rid] = ids_named(fake, NODE)
-    assert report["destroy_refused"] == [{"name": NODE, "id": rid}]
-    assert not remote.pushed and not issuer.calls and not fake.deleted
+    rid = records(root)[NODE].droplet_id
+    assert report["failed"] == [{"name": NODE, "status": "destroyed"}]
+    assert not report["destroy_refused"] and not remote.pushed and not issuer.calls
+    assert fake.deleted == [("droplet", rid)] and not ids_named(fake, NODE)
     record = records(root)[NODE]
-    assert record.status == "destroy_refused" and record.assign_failed_at
-    report = await reconcile(fake, root, remote, issuer, clock)  # left for the owner
-    assert report["destroy_refused"] == [{"name": NODE, "id": rid}] and not remote.pushed
-    assert not report["created"] and not fake.deleted
+    assert record.status == "destroyed" and record.assign_failed_at
+    lines = (root / "audit.jsonl").read_text().splitlines()
+    assert json.loads(lines[-1])["path"] == "own_unassigned"
 
 
-async def test_a_late_dev_resources_membership_never_deletes_the_node(tmp_path, monkeypatch):
-    """The assignment landed but showed only after the retries: the fail-closed path must
-    still leave the node for the owner, never delete it, and report it truthfully."""
+async def test_a_late_dev_resources_membership_removes_the_node_on_the_normal_path(
+    tmp_path, monkeypatch
+):
+    """The assignment landed but showed only after the retries: the node is still never
+    armed, and the guard removes it with every pulse check (it is in Dev Resources now)."""
     root = make_root(tmp_path)
     fake, (remote, issuer, clock) = world(), services()
     fake.faults.append(Fault("POST", f"/v2/projects/{DEV}/resources", 500, times=10**6))
@@ -316,9 +320,10 @@ async def test_a_late_dev_resources_membership_never_deletes_the_node(tmp_path, 
     monkeypatch.setattr(scope_module, "remove_unassigned", late)
     report = await reconcile(fake, root, remote, issuer, clock)
     rid = records(root)[NODE].droplet_id
-    assert not fake.deleted and ids_named(fake, NODE) == [rid]
-    assert not [r for r in fake.requests if r[0] == "DELETE"]
-    assert report["destroy_refused"] == [{"name": NODE, "id": rid}]
+    assert fake.deleted == [("droplet", rid)] and not ids_named(fake, NODE)
+    assert report["failed"] == [{"name": NODE, "status": "destroyed"}]
     record = records(root)[NODE]
-    assert record.status == "destroy_refused" and record.assign_failed_at
-    assert record.destroyed_at is None and not remote.pushed and not issuer.calls
+    assert record.status == "destroyed" and record.assign_failed_at and record.destroyed_at
+    assert not remote.pushed and not issuer.calls
+    lines = (root / "audit.jsonl").read_text().splitlines()
+    assert json.loads(lines[-1])["path"] == "normal"

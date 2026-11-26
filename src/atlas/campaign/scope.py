@@ -15,7 +15,7 @@ import time
 import weakref
 from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal
@@ -44,6 +44,8 @@ from .do_api import DigitalOcean, ScopeError, parse_droplet
 _GUARD = object()
 PROJECT_CACHE_SECONDS = 60.0
 OWN_UNASSIGNED_SECONDS = 30 * 60
+# A pulse droplet's creation time may lead its record's `requested_at` by the two clocks' skew.
+CREATE_SKEW = timedelta(minutes=2)
 # The only statuses in which a later process may hand a worker with the ledger mark to the guard.
 UNASSIGNED_REMOVABLE = ("assign_failed", "destroy_failed", "destroyed")
 # Just after a create, DigitalOcean may answer a GET without the droplet, its tags, its name or
@@ -225,7 +227,7 @@ async def _droplet_checks(
     project_name = PULSE_PROJECT_NAME if pulse else PROJECT_NAME
     checks["project_id"] = await _project_named(cloud, scope.project_id, project_name)
     in_project = await _in_project(cloud, scope.project_id, droplet.id)
-    if in_project or pulse:  # a pulse node has no own-unassigned path
+    if in_project:
         return checks | {"project": in_project}
     record = ledger.records.get(droplet.id)
     # The ledger mark: only assign_and_verify_project writes it, for an id it had checked
@@ -239,12 +241,29 @@ async def _droplet_checks(
         "assign_failed": marked,
         "own_create": droplet.id in cloud.created_ids or marked,
         "exact_name": marked and record.name == droplet.name,
-        "fresh": (utcnow() - droplet.created_at).total_seconds() <= OWN_UNASSIGNED_SECONDS,
     }
+    if pulse:  # created by its record's request, however long ago (PULSE-TEARDOWN-1)
+        exception["after_request"] = marked and created_after_request(droplet, record)
+    else:
+        age = (utcnow() - droplet.created_at).total_seconds()
+        exception["fresh"] = age <= OWN_UNASSIGNED_SECONDS
     if all(exception.values()):
         entry["path"] = "own_unassigned"
         return checks | exception
     return checks | {"project": False}
+
+
+def created_after_request(droplet: Droplet, record: DropletRecord) -> bool:
+    """Whether `droplet` was created no earlier than its pulse record's request (less
+    CREATE_SKEW): a droplet of the same name made before cannot be that request's. A record
+    without a readable `requested_at` proves nothing."""
+    try:
+        requested = datetime.fromisoformat(record.requested_at or "")
+    except ValueError:
+        return False
+    if requested.tzinfo is None:
+        requested = requested.replace(tzinfo=UTC)
+    return droplet.created_at >= requested - CREATE_SKEW
 
 
 def _other_checks(kind: str, raw: dict, ledger: Ledger, environment: str) -> dict[str, bool]:
@@ -537,8 +556,9 @@ async def remove_unassigned(
     cannot leave an unmarked worker. Its record ends `destroyed`, or `destroy_refused` /
     `destroy_failed` for the caller to flag (and save). An id that is not from this client's
     create raises `OwnershipError` and nothing is marked. A pulse node (role "pulse", pulse scope)
-    has no own-unassigned path: no delete is attempted, even when its membership shows late,
-    and its record ends `destroy_refused` for the owner.
+    takes the same path, its age replaced by its creation after its record's request
+    (`created_after_request`; PULSE-TEARDOWN-1): one stuck outside Dev Resources is removed at
+    once, not left up for the owner.
     """
     _same_kind(scope, role)
     ids = sorted(causes)
@@ -554,10 +574,6 @@ async def remove_unassigned(
     except Exception as error:  # boundary: the delete still runs; the caller's own save re-raises
         for rid in ids:
             records[rid].error_detail = causes[rid] | {"save_error": type(error).__name__}
-    if role == "pulse":  # never deleted here, whatever its membership shows by now
-        for rid in ids:
-            records[rid].status = "destroy_refused"
-        return
     ledger = Ledger({"droplet": ids}, records)
     for rid in ids:
         try:

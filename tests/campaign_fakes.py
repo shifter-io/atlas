@@ -47,6 +47,9 @@ class FakeDigitalOcean:
         self.deleted: list[tuple[str, str]] = []
         self.assign_delay = 0
         self.create_then_fail = 0
+        # The tag listing lags a create: a new droplet is missing from this many tag listings.
+        self.list_lag = 0
+        self.unlisted_for: dict[str, int] = {}
         self.pending: set[str] = set()
         self.unlisted: list[tuple[str, str]] = []
         self.sizes = [
@@ -194,11 +197,18 @@ class FakeDigitalOcean:
     async def _list(self, request):
         tag = request.query.get("tag_name")
         found = [d for d in self.droplets.values() if tag is None or tag in d["tags"]]
+        lagging = {i for i, left in self.unlisted_for.items() if left > 0} if tag else set()
+        found = [d for d in found if str(d["id"]) not in lagging]
+        if int(request.query.get("page", 1)) == 1:  # one listing, however many pages
+            for droplet_id in lagging:
+                self.unlisted_for[droplet_id] -= 1
         return self._page(request, "droplets", found)
 
     async def _create(self, request):
         body = await request.json()
         created = [self.droplets[self.add(name, body["tags"])] for name in body["names"]]
+        for droplet in created:
+            self.unlisted_for[str(droplet["id"])] = self.list_lag
         if self.create_then_fail:  # created, but the answer is lost
             self.create_then_fail -= 1
             return web.json_response({"id": "server_error"}, status=500)

@@ -1,11 +1,14 @@
 """PULSE-REPLACE-1: arming an hour's pulse droplets, with one replacement for a droplet that never
-boots.
+boots or never starts.
 
 A droplet ends `boot_failed` when it never became active or never answered SSH within the pulse
-fleet's limits. Such a node is replaced once, at once: its droplet is removed through the
+fleet's limits, `start_failed` when pushing or starting its node failed (PULSE-STARTFAIL-1: on
+2026-11-19 one such droplet stayed up 54 minutes, until the hour's final removal, and its cell
+had no pulses). Such a node is replaced once, at once: its droplet is removed through the
 guarded path (pulse_removal.retire_many) and the pulse fleet creates and arms one new droplet for
 the same cell (`Fleet.reconcile` for that cell only: the same create, project and arming
-checks; one for one, so the hour's cap still holds). The ledger record of the cell then counts
+checks; one for one, so the hour's cap still holds); a replacement that fails too is removed at
+once, never kept up to the end of the hour. The ledger record of the cell then counts
 two `attempts`; the hour's `replaced` lists the old droplet, the reason and whether the new one
 armed. A replacement that fails too, or an old droplet not verified gone, leaves the cell
 without a node: `hand_off` gives its countries to the armed droplet of the same network with the
@@ -33,7 +36,7 @@ from . import pulse_fleet
 from .pulse_fleet import Fleet, FleetClients, FleetConfig, node_name
 from .pulse_removal import retire_many
 
-REPLACEABLE = frozenset({"boot_failed"})  # never active, or SSH never ready
+REPLACEABLE = frozenset({"boot_failed", "start_failed"})  # never booted, or never started
 
 
 async def arm(hour_root: Path, config: FleetConfig, s) -> dict:
@@ -56,7 +59,7 @@ def armed_cells(config: FleetConfig, plan: HourPlan, records: dict) -> dict[str,
 
 
 def boot_failed(config: FleetConfig, records: dict) -> list[str]:
-    """The names of the cells' nodes that never booted."""
+    """The names of the cells' nodes that never booted or never started (REPLACEABLE)."""
     names = [node_name(network, region) for network, region in config.cells or ()]
     return [name for name in names if name in records and records[name].status in REPLACEABLE]
 
@@ -77,6 +80,10 @@ async def replace_once(hour_root: Path, config: FleetConfig, names: list[str], s
         except Exception as caught:  # boundary: the other regions' pulses go on
             error = type(caught).__name__
     records = pulse_fleet.load_nodes(hour_root)
+    again = sorted(name for name in gone if records[name].status in REPLACEABLE)
+    if again:  # the replacement failed too: no use keeping it up to the end of the hour
+        await retire_many(hour_root, again, s.cloud, s.clock)
+        records = pulse_fleet.load_nodes(hour_root)
     return [
         {"name": name, "old_id": old[name].droplet_id, "reason": old[name].status}
         | {"removed": name in gone, "armed": name in gone and records[name].status == "armed"}

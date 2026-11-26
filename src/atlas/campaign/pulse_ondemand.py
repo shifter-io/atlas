@@ -8,7 +8,8 @@ over the cap, then, with its ledger in `<root>/hours/<YYYYMMDDTHH>/`:
 
 1. creates and arms the hour's nodes through the pulse fleet (`Fleet.reconcile` with the hour's
    cells: create under the pulse tag, confirm project Dev Resources, push the node and start it)
-   and replaces a node that never booted once (pulse_replace, PULSE-REPLACE-1: `replaced`);
+   and replaces a node that never booted or never started once (pulse_replace,
+   PULSE-REPLACE-1, PULSE-STARTFAIL-1: `replaced`);
 2. opens the hour's pulses for the armed cells (orchestrator.pulse_hour.open_hour): the regions
    where every node booted at once, the others after their replacements;
 3. waits until no run of the hour is left to store, retiring and removing at once each armed
@@ -23,7 +24,12 @@ over the cap, then, with its ledger in `<root>/hours/<YYYYMMDDTHH>/`:
 
 The cap counts only the droplets under the pulse tag younger than LEFTOVER_AGE; an older one is
 a leftover of a finished hour: never counted, removed through the hour ledger that records it,
-and the leftovers share one major alert, `pulse_leftover`, one per hour (PULSE-COMPACT-1).
+and the leftovers share one major alert, `pulse_leftover`, one per hour (PULSE-COMPACT-1). So is
+a younger one an earlier hour's ledger records (that hour's job ended by STORE_BY, or a reset
+killed it before its removal: on 2026-11-25 seven such droplets held the 21:00 hour at the cap),
+or one whose record gave it up in any ledger (its assignment, removal, boot or start failed;
+pulse_removal.finished, PULSE-TEARDOWN-1): a reset or one stuck droplet never blocks the next
+hour. The leftovers still up count only toward the account's room (daily.pulses.check_cap).
 
 A node not verified gone opens the `pulse_teardown_failed` alert (major, one per hour) and is
 listed in `leftover`. An hour that created none of its droplets (every create failed, or
@@ -80,7 +86,7 @@ from .contracts import PULSE_TAG, with_legacy
 from .current_wheel import CurrentWheel
 from .pulse_alerts import alert, hour_alerts, hour_failed
 from .pulse_fleet import FleetConfig, FleetError, node_name
-from .pulse_removal import remove_all, remove_leftovers
+from .pulse_removal import finished, remove_all, remove_leftovers
 from .pulse_wait import NOTHING, WAIT_POLL_SECONDS, Deadlines, merge, remove_done, wait_and_remove
 
 # A droplet's hard stop: created from HH:57, gone by HH+1:22 (the wait ends REMOVE_LEAD before),
@@ -295,21 +301,27 @@ def _state(outcome: dict) -> str:
     return "partial" if outcome["lost"] or outcome.get("leftover") else "done"
 
 
-async def sweep_leftovers(root: Path, hour: datetime, s: Services, now: datetime) -> int:
-    """The droplets under the pulse tag that may still be working (younger than LEFTOVER_AGE):
-    the cap counts them. Older ones are leftovers: removed, with one grouped alert."""
+async def sweep_leftovers(
+    root: Path, hour: datetime, s: Services, now: datetime
+) -> tuple[int, int]:
+    """The droplets under the pulse tag that may still be working for `hour` (younger than
+    LEFTOVER_AGE, and not pulse_removal.finished), which the cap counts, and the leftovers still
+    up after the others were removed, with one grouped alert."""
     up = {d.id: d for tag in with_legacy([PULSE_TAG]) for d in await s.cloud.list_tag(tag)}
-    old = [d for d in up.values() if now - d.created_at > LEFTOVER_AGE]
-    if old:
-        swept = await remove_leftovers(root, old, s.cloud, s.clock)
-        gone = sum(1 for item in swept if item["removed"])
-        message = (
-            f"pulse hour {hour:%Y-%m-%d %H}:00 UTC: {len(old)} pulse droplets older than "
-            f"{LEFTOVER_AGE.seconds // 60} minutes were still up; {gone} removed"
-        )
-        data = {"nodes": swept}
-        await reconnecting(s.clock, alert, s.db, hour, "pulse_leftover", message, data)
-    return len(up) - len(old)
+    ended = finished(root, f"{hour:%Y%m%dT%H}")
+    old = [d for d in up.values() if now - d.created_at > LEFTOVER_AGE or d.id in ended]
+    if not old:
+        return len(up), 0
+    swept = await remove_leftovers(root, old, s.cloud, s.clock)
+    gone = sum(1 for item in swept if item["removed"])
+    message = (
+        f"pulse hour {hour:%Y-%m-%d %H}:00 UTC: {len(old)} pulse droplets older than "
+        f"{LEFTOVER_AGE.seconds // 60} minutes or left by an earlier hour were still up; "
+        f"{gone} removed"
+    )
+    data = {"nodes": swept}
+    await reconnecting(s.clock, alert, s.db, hour, "pulse_leftover", message, data)
+    return len(up) - len(old), len(old) - gone
 
 
 async def _hour_plan(inputs: HourInputs, s: Services, hour: datetime, now: datetime):
@@ -319,8 +331,8 @@ async def _hour_plan(inputs: HourInputs, s: Services, hour: datetime, now: datet
     schedules = load_schedules(inputs.formulas)
     skip = await expected.aread(s.db, inputs.formulas, hour)  # low availability: no pulses
     plan = pulse_hour(schedules, hour.hour, networks=tuple(sorted(config.networks)), skip=skip)
-    running = await sweep_leftovers(inputs.root, hour, s, now)
-    check_cap(plan, inputs.cap, running=running)
+    running, leftovers = await sweep_leftovers(inputs.root, hour, s, now)
+    check_cap(plan, inputs.cap, running=running, leftovers=leftovers)
     code = current_wheel.load(current_wheel.wheels_dir(inputs.root.parent))
     return hour_config(config, plan, code), plan, code
 
