@@ -9,7 +9,9 @@ pulse settings) and is deleted once they are done; there is no per-droplet count
 The plan is a dry run: it writes nothing and calls no cloud. `check_cap` is the droplet guard:
 an hour that needs more than the cap (DEFAULT_CAP, configurable) creates none. The account's
 limit is 500 droplets; the daily test needs at most 74 in an hour and 18 networks x 8 regions
-is 144.
+is 144. Leftovers of finished hours still up (not working, alerted) never count toward the cap,
+only toward the account's room for pulse droplets (PULSE_ROOM: the limit less OTHER_DROPLETS),
+so one stuck leftover never blocks an hour that still fits the account (PULSE-TEARDOWN-1).
 
 `switch(on)` is the enable step's database half (`daily pulse-switch on`): `pulse.on_demand` on
 and the pulse-enabled HTTP targets at 60 minutes, which re-seeding never changes once a target
@@ -25,6 +27,8 @@ from .planner import HourPlan, plan_hour
 
 DEFAULT_CAP = 144  # the most pulse droplets an hour may create (18 networks x 8 regions)
 ACCOUNT_LIMIT = 500  # DigitalOcean's droplet limit on the account
+OTHER_DROPLETS = 100  # the daily test's at most 74 in an hour, the managers and the builders
+PULSE_ROOM = ACCOUNT_LIMIT - OTHER_DROPLETS
 HTTP_PULSES = "WHERE engine='http' AND pulse_enabled"
 HOURLY_SQL = "UPDATE targets SET pulse_interval_minutes=60 " + HTTP_PULSES
 TARGETS_SQL = (
@@ -54,8 +58,9 @@ def pulse_hour(
     return replace(plan_hour(every, 0, networks=networks, regions=regions), hour=hour)
 
 
-def check_cap(plan: HourPlan, cap: int = DEFAULT_CAP, running: int = 0) -> None:
-    """Refuse an hour whose droplets, with `running` pulse droplets still up, exceed `cap`."""
+def check_cap(plan: HourPlan, cap: int = DEFAULT_CAP, running: int = 0, leftovers: int = 0) -> None:
+    """Refuse an hour whose droplets, with `running` pulse droplets still up, exceed `cap`, or
+    with the `leftovers` of finished hours still up too, PULSE_ROOM."""
     if type(cap) is not int or not 0 < cap <= ACCOUNT_LIMIT:
         raise CapError(f"the pulse droplet cap must be 1..{ACCOUNT_LIMIT}")
     wanted = len(plan.cells) + running
@@ -63,6 +68,12 @@ def check_cap(plan: HourPlan, cap: int = DEFAULT_CAP, running: int = 0) -> None:
         raise CapError(
             f"the hour needs {len(plan.cells)} pulse droplets and {running} are still up: "
             f"{wanted} is over the cap of {cap}"
+        )
+    if wanted + leftovers > PULSE_ROOM:
+        raise CapError(
+            f"the hour needs {len(plan.cells)} pulse droplets, {running} are still up and "
+            f"{leftovers} leftovers: {wanted + leftovers} is over the account's room of "
+            f"{PULSE_ROOM}"
         )
 
 

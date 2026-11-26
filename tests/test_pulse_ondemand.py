@@ -297,8 +297,8 @@ async def test_a_leftover_of_a_finished_hour_never_blocks_the_next_one(tmp_path,
     )
     assert (kind, key) == ("pulse_leftover", "pulse_leftover:20261001T12")
     assert message == (
-        "pulse hour 2026-10-01 12:00 UTC: 2 pulse droplets older than 30 minutes were still "
-        "up; 1 removed"
+        "pulse hour 2026-10-01 12:00 UTC: 2 pulse droplets older than 30 minutes or left by "
+        "an earlier hour were still up; 1 removed"
     )
     assert [(n["name"], n["removed"], n["reason"]) for n in data["nodes"]] == [
         ("atlas-pulse-blr1-shifter", False, "in no hour ledger"),

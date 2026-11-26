@@ -305,9 +305,10 @@ def split(config: FleetConfig, plan: HourPlan) -> tuple[tuple, tuple]:
 
 async def arm_late(hour_root: Path, held: tuple, s) -> dict:
     """Create and arm the held cells' nodes (`held`: their config and plan) once the gate
-    opened: a node that never booted is replaced once and a cell still without one hands its
-    countries to its network's armed droplet in another region (pulse_replace). The armed nodes
-    by name (`armed`), the cells to open (`cells`) and the replaced, handed and lost cells."""
+    opened: a node that never booted or started is replaced once, and a cell still without one
+    hands its countries to its network's armed droplet in another region (pulse_replace). The
+    armed nodes by name (`armed`), the cells to open (`cells`) and the replaced, handed and lost
+    cells."""
     config, plan = held
     error, replaced = None, []
     try:

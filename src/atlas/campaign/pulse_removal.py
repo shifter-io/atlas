@@ -9,22 +9,30 @@ per node as pulse_fleet.retire (`destroyed`, `destroy_refused` or `destroy_faile
 at the end, also on a signal): a full hour goes in about ceil(144 / 16) x 12.5 s, under 2
 minutes. A record left unsaved by a kill is removed again next time: its fresh GET is absent.
 
-`remove_all` removes every recorded node of an hour not yet gone (an in-flight create's droplet
-taken first by its exact name); `remove_leftovers` removes the leftovers of finished hours
-found by the next hour's cap check through the hour ledgers that record them.
+`remove_all` removes every recorded node of an hour not yet gone; `remove_leftovers` removes the
+leftovers of finished hours found by the next hour's cap check through the hour ledgers that
+record them. Both first adopt the droplets of the ledgers' unsure creates (a lost answer, or a
+create a stopped process left `requested`; pulse_adopt: its own create's proof, never a name
+alone) and remove them on the guard's own-unassigned path (pulse_fleet.remove_unassigned): they
+never reached Dev Resources (PULSE-TEARDOWN-1).
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from ..onboarding.files import lock
-from . import pulse_fleet
-from .contracts import PULSE_PROJECT_NAME, PULSE_TAG
+from . import pulse_adopt, pulse_fleet
+from .contracts import PULSE_PROJECT_NAME
 
 REMOVE_CONCURRENCY = 16  # guarded removals at once (each a few API calls, about 12.5 s)
 LEDGER_HOURS = 48  # the newest hour ledgers searched for a leftover's record
+# A record in one of these, or with the guard's ledger mark (its assignment failed), ended its
+# droplet's work: a young droplet it holds is a leftover too.
+GIVEN_UP = frozenset({"destroy_refused", "destroy_failed", "boot_failed", "start_failed"})
+LOG = logging.getLogger(__name__)
 
 
 async def retire_many(root: Path, names, cloud, clock) -> dict[str, str | None]:
@@ -59,29 +67,39 @@ async def _retire_locked(root: Path, names: list[str], cloud, clock) -> dict[str
         pulse_fleet.save_nodes(root, records)
 
 
-async def adopt_in_flight(hour_root: Path, cloud) -> list[dict]:
-    """Records a stopped create left `requested` without an id: take each one's droplet by its
-    exact name under the pulse tag. A name with none or several stays unresolved, left over."""
-    records = pulse_fleet.load_nodes(hour_root)
-    waiting = sorted(n for n, r in records.items() if r.status == "requested" and not r.droplet_id)
-    if not waiting:
-        return []
-    found = await cloud.adopt_uncertain(waiting, PULSE_TAG)
-    left = []
-    for name in waiting:
-        matches = [d.id for d in found if d.name == name]
-        if len(matches) == 1:
-            records[name].droplet_id = matches[0]
-        else:
-            left.append({"name": name, "id": None, "reason": f"in-flight create: {len(matches)}"})
-    pulse_fleet.save_nodes(hour_root, records)
-    return left
+async def adopt_unsure(hour_root: Path, cloud, exclude=frozenset()) -> list[dict]:
+    """The ledger's unsure creates (pulse_adopt.unsure): adopt each one's droplet (none of the
+    ids in `exclude` or the ledger) and remove it on the own-unassigned path, under the hour
+    ledger's lock. A `requested` one without a droplet stays unresolved, left over; a lost
+    answer's without one made none."""
+    with lock(hour_root / ".lock"):
+        records = pulse_fleet.load_nodes(hour_root)
+        unsure = {n: r for n, r in records.items() if pulse_adopt.unsure(r)}
+        if not unsure:
+            return []
+        recorded = {r.droplet_id for r in records.values() if r.droplet_id}
+        found = await pulse_adopt.adopt(cloud, unsure, set(exclude) | recorded)
+        for name, droplet in found.items():
+            records[name].droplet_id = droplet.id
+        pulse_fleet.save_nodes(hour_root, records)
+        if found:
+            LOG.warning("pulse droplets of unsure creates adopted: %s", ", ".join(sorted(found)))
+            ids = {droplet.id: name for name, droplet in found.items()}
+            await pulse_fleet.remove_unassigned(hour_root, records, ids, cloud)
+    return [
+        {"name": name, "id": None, "reason": "in-flight create: not found"}
+        for name in sorted(unsure)
+        if name not in found and records[name].status == "requested"
+    ]
 
 
 async def remove_all(hour_root: Path, cloud, clock) -> list[dict]:
-    """Retire every recorded node not yet gone, an in-flight create's taken first by name;
+    """Retire every recorded node not yet gone, an unsure create's adopted and removed first;
     returns those not verified gone."""
-    left = await adopt_in_flight(hour_root, cloud)
+    try:
+        left = await adopt_unsure(hour_root, cloud)
+    except Exception as error:  # boundary: the recorded nodes still go; listed, so alerted
+        left = [{"name": "unsure creates", "id": None, "reason": type(error).__name__}]
     records = pulse_fleet.load_nodes(hour_root)
     up = [n for n, r in records.items() if r.droplet_id and r.status != "destroyed"]
     reasons = await retire_many(hour_root, up, cloud, clock)  # in parallel, guarded
@@ -93,28 +111,56 @@ async def remove_all(hour_root: Path, cloud, clock) -> list[dict]:
     return left
 
 
-def _ledgers(root: Path) -> dict[str, tuple[Path, str]]:
-    """Each droplet id the newest hour ledgers record: its hour root and node name."""
+def _hour_roots(root: Path) -> list[Path]:
+    return sorted((root / "hours").glob("*T*"))[-LEDGER_HOURS:]
+
+
+def _ledgers(root: Path) -> dict[str, tuple[Path, str, bool]]:
+    """Each droplet id the newest hour ledgers record: its hour root, node name and whether its
+    record gave it up (GIVEN_UP, or the ledger mark)."""
     found = {}
-    for hour_root in sorted((root / "hours").glob("*T*"))[-LEDGER_HOURS:]:
+    for hour_root in _hour_roots(root):
         try:
             records = pulse_fleet.load_nodes(hour_root)
         except (OSError, ValueError, TypeError, KeyError):  # corrupt: never blocks the hour
             continue
         for name, record in records.items():
             if record.droplet_id:
-                found[record.droplet_id] = (hour_root, name)
+                dead = record.status in GIVEN_UP or bool(record.assign_failed_at)
+                found[record.droplet_id] = (hour_root, name, dead)
     return found
+
+
+def finished(root: Path, hour: str) -> set[str]:
+    """The droplet ids no running hour can still use (PULSE-TEARDOWN-1): recorded by the ledger
+    of an hour before `hour` (YYYYMMDDTHH; its job ended by STORE_BY, or a reset killed it before
+    its removal), or given up by their record in any ledger."""
+    return {
+        rid for rid, (hour_root, _, dead) in _ledgers(root).items() if dead or hour_root.name < hour
+    }
+
+
+async def _adopt_ledgers(root: Path, cloud, exclude: set[str]) -> None:
+    """adopt_unsure in each of the newest hour ledgers; a held lock or an error skips one."""
+    for hour_root in _hour_roots(root):
+        try:
+            await adopt_unsure(hour_root, cloud, exclude)
+        except Exception as error:  # boundary: never blocks the hour; listed if still up
+            LOG.warning("pulse ledger %s not adopted: %s", hour_root.name, type(error).__name__)
 
 
 async def remove_leftovers(root: Path, old: list, cloud, clock) -> list[dict]:
     """Remove the leftover droplets `old` through the hour ledgers of the pulse root that record
-    them (the guarded path, in parallel); one entry per droplet: removed, or why not."""
+    them (the guarded path, in parallel); one entry per droplet: removed, or why not. A
+    droplet no ledger records may be an unsure create's: the ledgers adopt theirs first."""
     ledgers = _ledgers(root)
+    if any(droplet.id not in ledgers for droplet in old):
+        await _adopt_ledgers(root, cloud, set(ledgers))
+        ledgers = _ledgers(root)
     by_root: dict[Path, dict[str, str]] = {}
     for droplet in old:
         if droplet.id in ledgers:
-            hour_root, name = ledgers[droplet.id]
+            hour_root, name, _ = ledgers[droplet.id]
             by_root.setdefault(hour_root, {})[name] = droplet.id
     reasons = {}
     for hour_root, names in sorted(by_root.items()):

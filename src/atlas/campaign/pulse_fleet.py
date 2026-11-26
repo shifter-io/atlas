@@ -16,10 +16,12 @@ hour starved on disk and stalled. Arming stops, disables and removes the updater
 arming installed; a `dbip_base_url` left in fleet.json is ignored.
 
 Reconcile only creates: a droplet it did not record, or one no longer wanted, is reported as
-`unknown` and never touched, and it never deletes anything (a node whose assignment was not
-confirmed ends `destroy_refused`, for the owner). `retire --name N` removes one recorded node,
-only through `scope.retire_pulse_node`, and checks it gone; a later reconcile creates it again
-unless `fleet.json` no longer lists it. Exit codes: reconcile 1 when a node failed or waits for
+`unknown` and never touched. A node whose assignment was not confirmed is removed at once on the
+guard's own-unassigned path (scope.remove_unassigned; `destroy_refused` when the guard refuses).
+A create whose answer was lost is read again for about a minute (pulse_adopt,
+PULSE-TEARDOWN-1). `retire --name N` removes one recorded node, only through
+`scope.retire_pulse_node`, and checks it gone; a later reconcile creates it again unless
+`fleet.json` no longer lists it. Exit codes: reconcile 1 when a node failed or waits for
 the owner (`destroy_refused`), retire 1 when the node was not verified gone; otherwise 0.
 
 The node service runs as root (decision PULSE-1b): the droplet is single-purpose, its secrets
@@ -60,7 +62,7 @@ from ..errors import UserError
 from ..node_tls import client_tls
 from ..onboarding.files import atomic_json, lock
 from ..onboarding.scheduler import Clock
-from . import scope
+from . import pulse_adopt, scope
 from .contracts import (
     ACCOUNTS,
     NETWORK_RE,
@@ -315,12 +317,15 @@ class Fleet:
         waiting = {n: r for n, r in self.records.items() if r.status == "requested"}
         if not waiting:
             return
-        found = await self.cloud.adopt_uncertain(sorted(waiting), PULSE_TAG)
-        for name, record in waiting.items():
-            matches = [d for d in found if d.name == name]
-            if record.droplet_id is None and len(matches) == 1:
-                record.droplet_id = matches[0].id
+        found = await self._adopt_now([n for n, r in waiting.items() if r.droplet_id is None])
+        for name, droplet in found.items():
+            self.records[name].droplet_id = droplet.id
         self.save()
+
+    async def _adopt_now(self, names: list[str]) -> dict[str, Droplet]:
+        """pulse_adopt.adopt for these records, none of the ledger's recorded ids."""
+        recorded = {r.droplet_id for r in self.records.values() if r.droplet_id}
+        return await pulse_adopt.adopt(self.cloud, {n: self.records[n] for n in names}, recorded)
 
     async def _lost(self, name: str, shown: set[str]) -> bool:
         """Whether `name` needs a new droplet: no record, or its recorded one is gone."""
@@ -334,6 +339,7 @@ class Fleet:
         return True
 
     async def _create(self, names: list[str], wanted: dict[str, tuple[str, str]]) -> None:
+        unsure: list[str] = []
         for region in sorted({wanted[n][1] for n in names}):
             batch = [n for n in names if wanted[n][1] == region]
             for name in batch:
@@ -353,7 +359,25 @@ class Fleet:
             failed = [self.records[n] for n in batch if self.records[n].droplet_id is None]
             if failed:
                 self._create_failed(region, failed, error)
+                unsure += [r.name for r in failed if pulse_adopt.unsure(r)]
             self.save()
+        if unsure:
+            await self._adopt_late(unsure)
+
+    async def _adopt_late(self, names: list[str]) -> None:
+        """The lost creates' droplets the tag listed only later (pulse_adopt.adopt_waiting):
+        each one found goes on to the project and arming as if its create had answered."""
+        recorded = {r.droplet_id for r in self.records.values() if r.droplet_id}
+        waiting = {n: self.records[n] for n in names}
+        found = await pulse_adopt.adopt_waiting(self.cloud, waiting, self.clock, recorded)
+        for name, droplet in sorted(found.items()):
+            record = self.records[name]
+            record.droplet_id, record.status = droplet.id, "requested"
+            record.error_class = record.error_detail = None
+            self.report["created"].append(name)
+        if found:
+            LOG.warning("pulse create answer lost, droplets found later: %s", ", ".join(found))
+        self.save()
 
     def _create_failed(self, region: str, failed: list[DropletRecord], error) -> None:
         kind, detail = create_failure(self.cloud, error)
@@ -377,8 +401,8 @@ class Fleet:
         except CreateError as error:  # an uncertain rest is taken by its exact names
             if not error.uncertain:
                 return error.created, error
-            adopted = await self.cloud.adopt_uncertain(error.pending, PULSE_TAG)
-            return error.created + adopted, error
+            adopted = await self._adopt_now(error.pending)
+            return error.created + list(adopted.values()), error
         except (OldImageError, ScopeError, ApiError) as error:  # refused before any create
             return [], error
 
@@ -486,7 +510,7 @@ class Fleet:
         """The report list a wanted node belongs in, and its entry; None for a fresh create."""
         if record.status == "armed" and name not in self.report["created"]:
             return "present", name
-        if record.assign_failed_at or record.status in ("destroy_refused", "destroy_failed"):
+        if record.status in ("destroy_refused", "destroy_failed"):
             return "destroy_refused", {"name": name, "id": record.droplet_id}
         if record.status != "armed":
             return "failed", {"name": name, "status": record.status}
@@ -553,6 +577,25 @@ async def retire_recorded(root: Path, records: dict, name: str, project_id: str,
     record.status = "destroyed" if gone else "destroy_failed"
     record.destroyed_at = _now() if gone else None
     return None if gone else "not gone"
+
+
+async def remove_unassigned(root: Path, records: dict, ids: dict[str, str], cloud) -> None:
+    """The adopted droplets of unsure creates (`ids`: id -> name; pulse_adopt), never assigned
+    to Dev Resources: marked and removed on the guard's own-unassigned path for the pulse role
+    (scope.remove_unassigned), each keeping the cause its record has; `records` saved."""
+    by_id = {rid: records[name] for rid, name in ids.items()}
+    causes = {
+        rid: record.error_detail or scope.error_detail(cloud, [rid], failed=["project"])
+        for rid, record in by_id.items()
+    }
+    project = scope.pulse_scope(await cloud.project_id(PULSE_PROJECT_NAME))
+    audit = root / "audit.jsonl"
+    try:
+        await scope.remove_unassigned(
+            cloud, project, by_id, audit, causes, "pulse", lambda: save_nodes(root, records)
+        )
+    finally:
+        save_nodes(root, records)
 
 
 async def _gone(cloud, droplet_id: str, clock) -> bool:
