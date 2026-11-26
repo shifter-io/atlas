@@ -69,6 +69,9 @@ async def test_a_stopped_network_keeps_its_standing_until_measured_again(databas
     later = end + 5 * HOUR
     second = networks(database, calculate(database, on, as_of=later, publish=True))
     assert_frozen_from(second["delta"], first["delta"], end, later)
+    # The API shifts it by the first build's group bests: it serves what that build published.
+    for label, w in second["delta"]["windows"].items():
+        assert w["standing"]["bests"] == standing.bests(list(first.values()), label), label
     for provider in PROVIDERS[:3]:
         w = second[provider]["windows"]["24h"]
         assert w["standing"]["status"] == standing.MEASURED

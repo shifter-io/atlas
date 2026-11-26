@@ -988,7 +988,9 @@ change. Nothing goes above 10 (the offset is 10 − the best) or below 1 (every
 score is at least 1 and the offset at least 0); a group whose best is already
 10 has offset 0, and an all-null group is unchanged. The calculation's payload
 keeps the measured scores; the API shifts them when it builds its answers, so
-the methodology id does not change.
+the methodology id does not change. A range held while its network is not
+measured (`measurementState`) is in no group: it sets no group's best, and a
+frozen one is shifted by the group bests kept with it (STANDING-FREEZE-2).
 
 | Group (one offset each) | Fields |
 |---|---|
@@ -1793,41 +1795,42 @@ the old site's `kindStanding` number: `rank`, or 1 for a network with a score al
 its kind (`peers` 1), which the framework leaves unranked ("#1 of 1"). A
 catalog network without a snapshot product has no score or rank.
 
-`measurementState` (STANDING-FREEZE-1, the framework's `windows[range].standing`,
-`calculated/standing.py`) says whether the network was measured in that range:
-`status` `measured`, `frozen` or `stopped` (`/v1/codes` set
-`measurement_status`), `lastMeasuredAt` (its newest stored network request),
-`frozenSince` (the build that froze it) and `valuesAsOf` (the cutoff of the
-build its values are from), ISO times, null when they do not apply. A network
-is held from the first build in which its newest request is the
+`measurementState` (STANDING-FREEZE-1, the framework's
+`windows[range].standing`, `calculated/standing.py`) says whether the network
+was measured in that range: `status` `measured`, `frozen` or `stopped`
+(`/v1/codes` set `measurement_status`), `lastMeasuredAt` (its newest stored
+network request), `frozenSince` (the build that froze it) and `valuesAsOf` (the
+cutoff of the build its values are from), ISO times, null when they do not
+apply. A network is held from the first build in which its newest request is the
 methodology's `[standing] freeze_after_hours` (3) old, whatever the reason: a
-frozen range's Atlas Score (`score`, `grade`, `rank`, `breakdown`), Success
-x/10 (`successScore`, and `days[].successScore` on the dates the measured
-networks also have), latency, uptime,
-`downtimeMinutes`, request figures and history (`successScoreSpark`,
-`atlasScoreSpark`, the chart points) are the last published ones from before
-it stopped; its unique IPs and place counts stay the current window's. Not
-held: its browser overall (`browserOverall.<engine>.success.score`),
-`challengeScore` and per-target success, challenge and block scores keep
-their last measured values in the snapshot, but the API shows them relative
-to the current best of their group (SUCCESS-SHIFT-1: each group's best reads
-10), so they can change while it is frozen; they feed neither the Atlas
-Score nor its rank. Its days older than the measured networks' 30 days are
-shifted among the frozen networks alone (their best reads 10), so they can
-change too. Known limitations: a frozen network that was a group's best still
-counts in that group's best, so it still moves the other networks' shown
-browser, challenge and per-target scores; and while no measured network of
-its kind has a Success x/10 in a range, a frozen network's held one is that
-group's best and reads 10. A measured network
-that beats a frozen score passes it; a frozen network never ranks above its
-rank at the stop and is no peer of a measured network's scores. A `stopped` range
-had no earlier values to keep: no score and no rank. A range lifts once the
-network is measured again in at least `lift_coverage` (90%) of the range's
-hours since the earlier of its first request in the range and the stop.
-`/v1/networks` rows carry the 30-day `measurementState`,
-`/v1/networks/{slug}` each `ranges.<range>.measurementState` (all null on the
-all-networks answer). Every field is null for a network without a snapshot
-product, or a snapshot from before it.
+frozen range's Atlas Score (`score`, `grade`, `rank`, `breakdown`), Success x/10
+(`successScore`, and `days[].successScore` on the dates the measured networks
+also have), latency, uptime, `downtimeMinutes`, request figures and history
+(`successScoreSpark`, `atlasScoreSpark`, the chart points) are the last
+published ones from before it stopped; its unique IPs and place counts stay the
+current window's. Its browser overall (`browserOverall.<engine>.success.score`),
+`challengeScore` and per-target success, challenge and block scores are held too
+(STANDING-FREEZE-2): the API shifts them (SUCCESS-SHIFT-1, "The best network
+reads 10") by the group bests of the build its values are from, which the
+framework keeps with the frozen range (`standing.bests`), so they serve their
+last published values whatever the measured networks' best. A held range is in
+no shift group: it sets no group's best, so the measured networks are shown as
+if it were absent, and a network whose 30-day range is held serves its days as
+stored (the framework shifts them). The browser and challenge overalls' `rank`
+is on these served scores, so a list in rank order shows a higher score below a
+lower one only where a frozen network keeps its rank at the stop. A range frozen
+before this change gains its group bests from the newest published build at or
+before its `valuesAsOf` once (that build itself, unless retention removed it); a
+frozen range without bests is served as stored. These scores feed neither the
+Atlas Score nor its rank. A measured network that beats a frozen score passes
+it; a frozen network never ranks above its rank at the stop and is no peer of a
+measured network's scores. A `stopped` range had no earlier values to keep: no
+score and no rank. A range lifts once the network is measured again in at least
+`lift_coverage` (90%) of the range's hours since the earlier of its first
+request in the range and the stop. `/v1/networks` rows carry the 30-day
+`measurementState`, `/v1/networks/{slug}` each `ranges.<range>.measurementState`
+(all null on the all-networks answer). Every field is null for a network without
+a snapshot product, or a snapshot from before it.
 
 Row fields, from that range's `windowStats` (see "Window statistics of a
 measured provider"): `latencyP50`, `latencyP90`,
