@@ -20,7 +20,6 @@ import contextlib
 import json
 import logging
 import os
-import random
 import shutil
 import ssl
 import stat
@@ -37,7 +36,7 @@ from urllib.parse import urlsplit
 
 import aiohttp
 
-from . import __version__, node_dns
+from . import __version__, node_dns, node_upload
 from .models import ProxySource, RunConfig, RunSummary
 from .node_health import HostHealth
 from .node_pace import StartPacer, run_seconds
@@ -51,17 +50,6 @@ from .transport import HttpTransport
 log = logging.getLogger(__name__)
 
 ProxyFactory = Callable[[str], ProxySource]
-UPLOAD_ATTEMPTS = 8
-RETRY_AFTER_MAX = 300.0  # seconds: the longest Retry-After an upload waits
-
-
-def _retry_after(exc: BaseException) -> float:
-    """A refused upload's Retry-After in seconds (503 ingest_busy, INGEST-HANG-1), else 0."""
-    headers = exc.headers if isinstance(exc, aiohttp.ClientResponseError) else None
-    try:
-        return min(float((headers or {}).get("Retry-After", 0)), RETRY_AFTER_MAX)
-    except ValueError:
-        return 0.0
 
 
 def read_token(path: str | Path) -> str:
@@ -611,11 +599,13 @@ class NodeAgent:
             log.warning("could not report batch %s failed (%s)", batch_id, type(exc).__name__)
 
     async def upload(self, batch_id: int, directory: Path) -> dict[str, Any]:
-        """POST the run directory as tar.gz, retrying transient failures with backoff (or the
-        orchestrator's longer Retry-After)."""
+        """POST the run directory as tar.gz. A failed try is retried until the run's hour ends
+        (node_upload, INGEST-HANG-2) after a capped backoff or the orchestrator's longer
+        Retry-After; a refused one (Rejected) is final."""
+        window = node_upload.Window.of(self.active.get(batch_id), self.upload_backoff)
         with tempfile.TemporaryDirectory(prefix="atlas-node-") as temporary:
             archive = await asyncio.to_thread(pack, directory, Path(temporary) / "run.tar.gz")
-            for attempt in range(UPLOAD_ATTEMPTS):
+            while True:
                 # Streamed from disk (aiohttp reads the file in its executor); reopened per try.
                 stream = await asyncio.to_thread(archive.open, "rb")
                 try:
@@ -625,24 +615,17 @@ class NodeAgent:
                         params={"batch_id": str(batch_id)},
                         data=stream,
                         headers={"Content-Type": "application/gzip"},
+                        **window.options,
                     )
                 except (aiohttp.ClientError, OSError, TimeoutError) as exc:
-                    delay = self.upload_backoff * 2**attempt * (1 + random.random() / 4)
-                    delay = max(delay, _retry_after(exc))
-                    log.warning(
-                        "upload of batch %s failed (%s); retry in %.0fs",
-                        batch_id,
-                        type(exc).__name__,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                    continue
+                    error: BaseException = exc
+                else:
+                    await asyncio.to_thread(shutil.rmtree, directory, True)
+                    log.info("batch %s uploaded: %s", batch_id, reply.get("status"))
+                    return reply
                 finally:
                     await asyncio.to_thread(stream.close)
-                await asyncio.to_thread(shutil.rmtree, directory, True)
-                log.info("batch %s uploaded: %s", batch_id, reply.get("status"))
-                return reply
-        raise RuntimeError("upload attempts exhausted")
+                await window.wait(batch_id, error)
 
 
 async def serve(agent: NodeAgent) -> None:

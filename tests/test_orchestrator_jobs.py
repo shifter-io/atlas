@@ -262,6 +262,7 @@ def test_job_table_registers_every_job_with_its_schedule():
         "pulse_evaluate": minute,
         "reap": minute,
         "offline": {"every_s": 15},
+        "results_watch": minute,
         "calculate": minute,
         "estimates_release": {"every_s": jobs.RELEASE_EVERY_S},
         "detect": minute,

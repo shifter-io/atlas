@@ -3,6 +3,9 @@
 census_plan / pulse_plan  every minute, on the minute: open due batches (batches.py)
 reap                      every minute: fail runs that never started or went silent (nodework.py)
 offline                   every 15 s: nodes without a heartbeat go offline
+results_watch             every minute: the major alert results_stalled while /v1/results has
+                          answered no upload 2xx for results.stalled_alert_minutes as nodes
+                          upload; acknowledged after the next 2xx (results_watch.py)
 calculate                 every minute, due by calculate.trigger: "hourly" (default) once per
                           UTC hour, calculate.hour_offset_seconds past it (at least
                           MIN_HOUR_OFFSET_S, so the hour just released is in), or "batch"
