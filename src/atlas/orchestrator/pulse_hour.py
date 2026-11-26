@@ -254,3 +254,11 @@ async def retire_nodes(db: Database, cells: list[Armed]) -> int:
             ([k[0] for k in keys], [k[1] for k in keys], [k[2] for k in keys]),
         )
         return cursor.rowcount
+
+
+async def heartbeat_since(db: Database, node_id: int, since: datetime) -> bool:
+    """Whether the node heartbeated after `since` (its token's issue: campaign.pulse_start)."""
+    query = "SELECT last_heartbeat>%s AS beat FROM nodes WHERE node_id=%s"
+    async with db.connection() as conn:
+        row = await _row(conn, query, (since, node_id))
+    return bool(row and row["beat"])

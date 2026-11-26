@@ -27,11 +27,13 @@ minutes), together with the handed-off countries. `opened` merges the two open_h
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from ..daily.planner import HourPlan
 from ..onboarding.files import lock
-from ..orchestrator.pulse_hour import Armed
+from ..orchestrator.db import reconnecting
+from ..orchestrator.pulse_hour import Armed, heartbeat_since
 from . import pulse_fleet
 from .pulse_fleet import Fleet, FleetClients, FleetConfig, node_name
 from .pulse_removal import retire_many
@@ -40,10 +42,16 @@ REPLACEABLE = frozenset({"boot_failed", "start_failed"})  # never booted, or nev
 
 
 async def arm(hour_root: Path, config: FleetConfig, s) -> dict:
-    """One pulse fleet pass for `config`'s cells under the hour ledger's lock; its report."""
+    """One pulse fleet pass for `config`'s cells under the hour ledger's lock; its report. A
+    start whose SSH failed is confirmed by the node's heartbeat in the hour's database
+    (pulse_start, PULSE-ARM-1)."""
+
+    async def beats(node_id: int, since: datetime) -> bool:
+        return await reconnecting(s.clock, heartbeat_since, s.db, node_id, since)
+
     with lock(hour_root / ".lock"):
-        fleet = Fleet(hour_root, config, FleetClients(s.cloud, s.remote, s.issuer, s.clock))
-        return await fleet.reconcile()
+        clients = FleetClients(s.cloud, s.remote, s.issuer, s.clock, beats)
+        return await Fleet(hour_root, config, clients).reconcile()
 
 
 def armed_cells(config: FleetConfig, plan: HourPlan, records: dict) -> dict[str, Armed]:
