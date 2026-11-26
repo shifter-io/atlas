@@ -8,14 +8,15 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 
+from campaign_hour_cases import ended, harvest_setup, harvested
 from orchestrator_cases import query
 from pulse_fleet_cases import FakeClock, world
 from test_pulse_budget import _daily
 from test_pulse_late_start import _budgeted
-from test_pulse_ondemand import HOUR, HourClock, hour, ready
+from test_pulse_ondemand import HourClock, hour, ready
 
 from atlas.campaign import pulse_late
-from atlas.campaign.contracts import DropletRecord, HourRecord
+from atlas.campaign.contracts import DropletRecord, HourRecord, hour_path
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
 
@@ -102,3 +103,19 @@ async def test_a_real_overlap_alerts_and_names_the_ended_cells_apart(
     assert "still going: shifter/lon1" in message
     assert "ended, results not stored yet: shifter/fra1" in message
     assert data["cells"] == ["shifter/lon1"] and data["ended_not_stored"] == ["shifter/fra1"]
+
+
+async def test_the_harvest_saves_an_ended_round_before_its_pull(tmp_path):
+    """A slow first pull (minutes) must not hide the ended round from the gate: the ledger on
+    disk shows the worker's `finished_at` while the pull still runs."""
+    spec, root, fake, record, remote, clock = await harvest_setup(tmp_path)
+    remote.inspected[record.droplets[0].name] = ended(130, "stopped")
+    seen, real = [], remote.pull
+
+    async def pull(droplet, remote_path, local):
+        seen.append(pulse_late._rounds_ended(json.loads(hour_path(root, 0).read_text())))
+        return await real(droplet, remote_path, local)
+
+    remote.pull = pull
+    await harvested(spec, record, root, fake, remote, clock)
+    assert seen == [{"net00/tor1"}] and record.droplets[0].status == "destroyed"

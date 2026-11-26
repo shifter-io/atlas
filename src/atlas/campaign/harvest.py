@@ -171,6 +171,7 @@ class _Harvest(HourWork):
         ended, code = round_ended(info)
         if ended:
             worker.status, worker.finished_at, worker.exit_code = "finished", self.now(), code
+            self.save()  # before the pull: the pulse gate reads it (pulse_late, PULSE-GATE-1)
         return ended
 
     def _progress(self, worker: DropletRecord, state: dict) -> None:

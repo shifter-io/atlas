@@ -142,7 +142,8 @@ def _stored(root: Path) -> set[str]:
 def _rounds_ended(record: dict) -> set[str]:
     """The cells ("network/region") whose worker's round has ended, by the worker's own round
     state (campaign.harvest sets its `finished_at` once the round unit ended, before the pull
-    that marks the cell; PULSE-GATE-1)."""
+    that marks the cell; PULSE-GATE-1). Any of a cell's workers ends it: only a worker that ran
+    its round has one, and a replacement comes only from a failed launch, before any round."""
     workers = record.get("droplets") or ()
     return {
         f"{worker.get('network')}/{worker.get('region')}"
