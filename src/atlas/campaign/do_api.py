@@ -518,8 +518,7 @@ class DigitalOcean:
 
     async def adopt_uncertain(self, names: list[str], tag: str, keep=None) -> list[Droplet]:
         """After an uncertain create: our tag's droplets with these names that `keep` keeps."""
-        listed = await self.list_tag(tag)
-        found = [d for d in listed if d.name in set(names) and (keep is None or keep(d))]
+        found = [d for d in await self.list_tag(tag) if d.name in names and (not keep or keep(d))]
         self._created.update(droplet.id for droplet in found)
         return found
 
