@@ -126,14 +126,15 @@ def held(database, network):
 
 
 def test_a_group_past_its_deadline_has_its_process_killed_and_its_locks_freed(
-    database, tmp_path, capsys
+    database, tmp_path, capsys, monkeypatch
 ):
     """net-a's group stops answering mid-transaction (it waits here on its network's lock, past
     the deadline): its worker process is killed, the group fails named, its session and locks
     go; net-b's group, in the other process, commits."""
     a, b = two_networks(tmp_path)
     storage.ingest(pulse(tmp_path / "first", 2), database)  # the day's partitions
-    options = storage_parallel.Options(connections=2, processes=2, deadline=10)
+    monkeypatch.setattr(storage_parallel, "DEADLINE", 10)
+    options = storage_parallel.Options(connections=2, processes=2)
     blocker = held(database, "net-a")
     others = f"{ADVISORY} AND pid<>pg_backend_pid()"
     try:
@@ -153,14 +154,15 @@ def test_a_group_past_its_deadline_has_its_process_killed_and_its_locks_freed(
 
 
 def test_a_thread_lane_s_group_past_its_deadline_is_named_once_and_left_to_its_session(
-    database, tmp_path, capsys
+    database, tmp_path, capsys, monkeypatch
 ):
     """P = 1: a thread cannot be killed. The group is named once (no busy loop after it) and,
     once its lock is free, commits."""
     a, _ = two_networks(tmp_path)
     storage.ingest(pulse(tmp_path / "first", 2), database)
     blocker = held(database, "net-a")
-    with storage_parallel.Pool(database, storage_parallel.Options(1, deadline=0.5)) as pool:
+    monkeypatch.setattr(storage_parallel, "DEADLINE", 0.5)
+    with storage_parallel.Pool(database, storage_parallel.Options(1)) as pool:
         tickets = pool.submit([a])
         time.sleep(2)
         blocker.close()
