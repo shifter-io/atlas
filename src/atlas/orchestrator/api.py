@@ -52,10 +52,28 @@ BROWSER_TLS_KEY: web.AppKey[ssl.SSLContext] = web.AppKey("browser_tls", ssl.SSLC
 ADMIN_PORT_KEY: web.AppKey[int] = web.AppKey("admin_port", int)
 CHUNK = 1 << 20
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
+# INGEST-HANG-1: an upload's import waits at most this long for a lock (its networks', held by
+# another import), then answers 503 with RETRY_AFTER; at most `results.ingest_concurrency`
+# uploads are received and imported at once by this process, the next answered the same way
+# before its body is read. Waiting uploads never hold the executor's threads, the database's
+# connections, or the memory their bodies take (/tmp is memory on the manager), without bound.
+UPLOAD_LOCK_WAIT = "30s"
+RETRY_AFTER = 30
+_uploads = [0]  # census and pulse uploads this process is receiving or importing now
 
 
 def _error(status: type[web.HTTPException], message: str) -> web.HTTPException:
     return status(text=json.dumps({"error": message}), content_type="application/json")
+
+
+def _busy(
+    retry_after: int, message: str, status: type[web.HTTPException] = web.HTTPTooManyRequests
+) -> web.HTTPException:
+    return status(
+        text=json.dumps({"error": message}),
+        content_type="application/json",
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 def _browser_listener(request: web.Request) -> bool:
@@ -344,6 +362,22 @@ async def results(request: web.Request) -> web.Response:
     if answered is not None:
         return answered
     async with db.connection() as conn:
+        concurrency = int(await setting(conn, "results.ingest_concurrency"))
+    if _uploads[0] >= concurrency:
+        raise _busy(RETRY_AFTER, "ingest_busy", web.HTTPServiceUnavailable)
+    _uploads[0] += 1
+    try:
+        return await _upload(request, run, batch_id, sent)
+    finally:
+        _uploads[0] -= 1
+
+
+async def _upload(
+    request: web.Request, run: dict[str, Any], batch_id: int, sent: str | None
+) -> web.Response:
+    """Receive, check, import and spool one census or pulse upload, then finish its run."""
+    db, node = request.app[DB_KEY], request[NODE_KEY]
+    async with db.connection() as conn:
         limits = (
             int(await setting(conn, "results.max_upload_bytes")),
             float(await setting(conn, "results.upload_timeout_seconds")),
@@ -426,8 +460,8 @@ async def _ingest(
     request: web.Request, batch_id: int, directory: Path, *, ip_rows: bool, counters: bool = False
 ):
     """storage.ingest of an upload's run directory with the ingest login: 503 when the database is
-    unreachable (the node keeps its file and retries), 422 and a failed run when the data is
-    refused."""
+    unreachable or a lock stays held past UPLOAD_LOCK_WAIT (the node keeps its file and
+    retries), 422 and a failed run when the data is refused."""
     runtime = request.app[CREDENTIALS_KEY]
     login = request.app.get(INGEST_CREDENTIALS_KEY, runtime)
     try:
@@ -439,7 +473,11 @@ async def _ingest(
             ip_rows=ip_rows,
             counters=counters,
             partitions_file=None if login == runtime else runtime,
+            lock_wait=UPLOAD_LOCK_WAIT,
         )
+    except psycopg.errors.LockNotAvailable:
+        log.warning("ingest of batch %s waited %s for a lock; retry", batch_id, UPLOAD_LOCK_WAIT)
+        raise _busy(RETRY_AFTER, "ingest_busy", web.HTTPServiceUnavailable) from None
     except psycopg.OperationalError:
         log.exception("ingest of batch %s could not reach the database", batch_id)
         raise _error(web.HTTPServiceUnavailable, "database unavailable; retry") from None
