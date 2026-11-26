@@ -73,6 +73,15 @@ once its upload is stored, so a droplet created before fills its two run slots a
 GATE_LATEST the droplets are created all the same, with the cells still storing in
 `daily_not_stored` (no alert: the import uses no connections).
 
+PULSE-GATE-1 (#1414): a cell runs until its worker's round ends, by the worker's own round
+state (its `finished_at` in the hour's ledger, set by campaign.harvest once the round unit
+ended), not until its results are pulled: the cell's ledger value stays `running` until a pull
+succeeds, and a cut transfer is retried every harvest.PULL_RETRY_SECONDS (5 minutes). So a cell
+stopped at its budget whose pull has not completed is ended but not stored (`daily_not_stored`,
+no alert). On 20 Nov 08:00 a cell stopped at 08:27, its first pull failed and the second ended
+at 08:39: the gate counted it as still running and raised a false `pulse_budget_overlap`. The
+alert names both lists: the cells still running and those ended but not stored yet.
+
 Timing and cost (BUDGET-STOP-EARLIER-1, #1293): GATE_LATEST is HH:30, so the network's daily
 cells stop at HH:27 (daily.overtime.BUDGET_STOP) and its daily droplet, created at about HH:58:30
 of the hour before, lives under 30 minutes with its teardown (with the stop at HH:35 it lived up
@@ -130,6 +139,18 @@ def _stored(root: Path) -> set[str]:
         return set()
 
 
+def _rounds_ended(record: dict) -> set[str]:
+    """The cells ("network/region") whose worker's round has ended, by the worker's own round
+    state (campaign.harvest sets its `finished_at` once the round unit ended, before the pull
+    that marks the cell; PULSE-GATE-1)."""
+    workers = record.get("droplets") or ()
+    return {
+        f"{worker.get('network')}/{worker.get('region')}"
+        for worker in workers
+        if isinstance(worker, dict) and worker.get("finished_at")
+    }
+
+
 def _waiting(root: Path, networks: set[str]) -> tuple[list[str], list[str]]:
     """One hour campaign's cells of `networks` still running, and those ended but not stored."""
     try:
@@ -149,7 +170,8 @@ def _waiting(root: Path, networks: set[str]) -> tuple[list[str], list[str]]:
     ended = ended or record.get("state") in FINAL
     if not ended and record.get("state") in ("planned", "launching") and not keys:
         return [f"{network}/launching" for network in due], []
-    running = [] if ended else sorted(key for key in keys if cells[key] in WAITING)
+    over = _rounds_ended(record)
+    running = [] if ended else sorted(k for k in keys if cells[k] in WAITING and k not in over)
     stored = _stored(root)
     return running, sorted(key for key in keys if key not in running and key not in stored)
 

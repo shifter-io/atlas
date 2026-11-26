@@ -184,6 +184,9 @@ async def _late(hour_root: Path, hour: datetime, held: tuple, s, where) -> dict:
         message = f"pulse hour {hour:%Y-%m-%d %H}:00 UTC: budgeted pulses at :{at}, daily runs "
         message += f"still going: {running}"
         data = {"cells": gate["daily_still_running"]}
+        if storing := gate.get("daily_not_stored"):  # PULSE-GATE-1: ended, not running
+            message += f"; ended, results not stored yet: {', '.join(storing)}"
+            data["ended_not_stored"] = storing
         await reconnecting(s.clock, alert, s.db, hour, "pulse_budget_overlap", message, data)
     armed = await pulse_late.arm_late(hour_root, held, s)
     cells, left = armed.pop("cells"), NOTHING | {"opened": {"created": 0}}
