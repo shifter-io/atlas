@@ -140,6 +140,15 @@ def finished(root: Path, hour: str) -> set[str]:
     }
 
 
+def _always_on(root: Path) -> set[str] | None:
+    """The ids the pulse root's own ledger records (the always-on fleet's, pulse_fleet); None
+    when it cannot be read: then nothing is adopted."""
+    try:
+        return {r.droplet_id for r in pulse_fleet.load_nodes(root).values() if r.droplet_id}
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
 async def _adopt_ledgers(root: Path, cloud, exclude: set[str]) -> None:
     """adopt_unsure in each of the newest hour ledgers; a held lock or an error skips one."""
     for hour_root in _hour_roots(root):
@@ -154,8 +163,9 @@ async def remove_leftovers(root: Path, old: list, cloud, clock) -> list[dict]:
     them (the guarded path, in parallel); one entry per droplet: removed, or why not. A
     droplet no ledger records may be an unsure create's: the ledgers adopt theirs first."""
     ledgers = _ledgers(root)
-    if any(droplet.id not in ledgers for droplet in old):
-        await _adopt_ledgers(root, cloud, set(ledgers))
+    always_on = _always_on(root)
+    if always_on is not None and any(droplet.id not in ledgers for droplet in old):
+        await _adopt_ledgers(root, cloud, set(ledgers) | always_on)
         ledgers = _ledgers(root)
     by_root: dict[Path, dict[str, str]] = {}
     for droplet in old:

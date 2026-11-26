@@ -274,3 +274,23 @@ async def test_the_coming_hours_own_droplets_still_count_toward_the_cap(tmp_path
     with pytest.raises(CapError, match="needs 2 pulse droplets and 1 are still up"):
         await hour(tmp_path, fake, db, HourClock(database), cap=2, ledger=ledger)
     assert rid in fake.droplets
+
+
+@pytest.mark.parametrize("readable", [True, False])
+async def test_the_sweep_never_adopts_an_always_on_fleet_node(tmp_path, readable):
+    """A droplet only the pulse root's own ledger records (`pulse-fleet reconcile`) is never
+    taken by a stale hour record; with that ledger unreadable, nothing is adopted at all."""
+    fake = world()
+    always = fake.add(NODE, [PULSE_TAG], project=DEV)
+    stray = fake.add(FRA1, [PULSE_TAG], project=PROD_PROJECT)
+    if readable:
+        pulse_fleet.save_nodes(tmp_path, {NODE: DropletRecord("shifter", "lon1", 0, NODE, always)})
+    else:
+        (tmp_path / "nodes.json").write_text("{not json")
+    hour20 = tmp_path / "hours" / "20261123T20"
+    pulse_fleet.save_nodes(hour20, {NODE: unsure(NODE), FRA1: unsure(FRA1, "fra1")})
+    async with running(fake, per_minute=10**6) as cloud:
+        old = [await cloud.get(always), await cloud.get(stray)]
+        await pulse_removal.remove_leftovers(tmp_path, old, cloud, FakeClock())
+    assert always in fake.droplets
+    assert (stray in fake.droplets) is not readable  # the stray goes only when adoption ran

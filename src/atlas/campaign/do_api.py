@@ -516,13 +516,10 @@ class DigitalOcean:
             )
         self._current_images.add(str(image))
 
-    async def adopt_uncertain(
-        self, names: list[str], tag: str, keep: Callable[[Droplet], bool] | None = None
-    ) -> list[Droplet]:
-        """After an uncertain create: the droplets under our tag with exactly these names (and,
-        with `keep`, only those it keeps: the caller's proof of its own create)."""
-        found = [d for d in await self.list_tag(tag) if d.name in set(names)]
-        found = [d for d in found if keep is None or keep(d)]
+    async def adopt_uncertain(self, names: list[str], tag: str, keep=None) -> list[Droplet]:
+        """After an uncertain create: our tag's droplets with these names that `keep` keeps."""
+        listed = await self.list_tag(tag)
+        found = [d for d in listed if d.name in set(names) and (keep is None or keep(d))]
         self._created.update(droplet.id for droplet in found)
         return found
 
