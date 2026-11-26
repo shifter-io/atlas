@@ -481,11 +481,13 @@ def store(
     processes: int | None = None,
     pool: Pool | None = None,
     on_commit: Callable | None = None,
+    deadline: float = DEADLINE,
 ) -> list[Outcome]:
     """Store the groups (Group) over `connections` connections in `processes` processes (None:
     sized to the machine, sizing.derived), or with an open `pool`; each one's Outcome.
 
-    on_commit(group, outcome) runs in this thread as each committed group finishes. A stop
+    on_commit(group, outcome) runs in this thread as each committed group finishes; a group
+    running past `deadline` seconds has its worker process killed (Pool). A stop
     (KeyboardInterrupt) hands out no more groups and waits for those in flight.
     """
     connections = _sized("connections", connections)
@@ -497,7 +499,8 @@ def store(
     if pool is not None:
         return pool.wait(groups, pool.submit(groups), on_commit)
     connections = _fitting(groups, connections, memory_budget)
-    with Pool(credentials_file, Options(connections, memory_budget, processes)) as own:
+    options = Options(connections, memory_budget, processes, deadline=deadline)
+    with Pool(credentials_file, options) as own:
         lanes = len(own.lanes)
         print(
             f"storage_parallel: {len(groups)} groups over {own.connections} connections, "
