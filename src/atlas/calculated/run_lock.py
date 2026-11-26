@@ -10,6 +10,11 @@ Two locks, held from the calculation's start to its end, neither waited for:
   shared by both.
 Either taken raises Busy; `atlas calculate` then exits BUSY_EXIT, which the orchestrator's
 calculate job records as skipped (jobs.run_calculation).
+
+CALC-STALE-SESSION-1: the build's transactions wait for rollups.LOCK at most WAIT (wait()). On
+25 Nov 2026 a calculation whose host was reset left its session holding that lock, and the next
+one waited 56 minutes on it, unseen. Past WAIT, LockWaitTimeout fails the calculation, so the
+calculate job fails and raises job_failed with its message; the next hour tries again.
 """
 
 from __future__ import annotations
@@ -20,16 +25,38 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
+import psycopg
+
+from ..errors import UserError
 from ..storage import connect
 
 # Not rollups.LOCK: the build's own transactions wait for that one, and would wait for this one.
 KEY = 817452908
 FILE_ENV = "ATLAS_CALCULATE_LOCK"
 BUSY_EXIT = 75  # EX_TEMPFAIL
+WAIT = "15min"  # a lock_timeout; a build waits seconds for it when no other session is stuck
 
 
 class Busy(RuntimeError):
     """Another calculation holds the database's or the server's lock."""
+
+
+class LockWaitTimeout(UserError):
+    """Another session held a calculation lock for longer than WAIT."""
+
+
+def wait(conn, key: int) -> None:
+    """Take the transaction advisory lock key, waiting at most WAIT; LockWaitTimeout after it.
+    Only this wait is bounded: the transaction's lock_timeout is the session's again after it."""
+    conn.execute(f"SET LOCAL lock_timeout = '{WAIT}'")  # takes no snapshot, unlike a SELECT
+    try:
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", (key,))
+    except psycopg.errors.LockNotAvailable:
+        raise LockWaitTimeout(
+            f"waited {WAIT} for the calculation's database lock {key}: another session holds "
+            "it (pg_locks where objid = the key; a session left by a reset host ends itself)"
+        ) from None
+    conn.execute("SET LOCAL lock_timeout TO DEFAULT")
 
 
 def lock_file() -> Path | None:

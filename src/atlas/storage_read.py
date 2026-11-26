@@ -9,7 +9,6 @@ import gzip
 import hashlib
 import json
 import math
-import os
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,7 +17,7 @@ from types import SimpleNamespace
 import psycopg
 from psycopg.types.json import Jsonb
 
-from .providers.dbconnect import connect_options
+from .providers.dbconnect import connect_options, session_options
 from .stats import Histogram
 
 # Request outcomes and wire bytes (v6 artifacts), per run, bucket and geography bucket.
@@ -96,14 +95,14 @@ NETWORK_FIELDS = ("isp", "organization", "asn", "asn_organization", "connection_
 
 
 # CALC-LOCK-1: a session whose client went away (a killed calculation) ends within this time,
-# also in the middle of a query, rather than running it to the end. Added to $PGOPTIONS, which
-# an explicit options parameter would replace (the scale tools set search_path there).
-CLIENT_CHECK = "-c client_connection_check_interval=10s"
+# also in the middle of a query, rather than running it to the end. CALC-STALE-SESSION-1: the
+# keepalives of session_options() end it also while it is idle (dbconnect.py).
+CLIENT_CHECK = "client_connection_check_interval=10s"
 
 
 def connect(credentials_file):
-    options = f"{os.environ.get('PGOPTIONS', '')} {CLIENT_CHECK}".strip()
-    return psycopg.connect(**connect_options(credentials_file), options=options, connect_timeout=5)
+    options = session_options(CLIENT_CHECK)
+    return psycopg.connect(**connect_options(credentials_file), **options, connect_timeout=5)
 
 
 def _digest(path):

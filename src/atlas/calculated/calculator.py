@@ -182,7 +182,7 @@ def _calculate(
     with temp_written(database), connect(database) as conn, Prefetcher(conn) as prefetch:
         conn.row_factory = dict_row
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-        conn.execute(f"SELECT pg_advisory_xact_lock({rollups.LOCK})")
+        run_lock.wait(conn, rollups.LOCK)
         prefetch.configure(parallel_reads)  # the calculate.* settings; SET LOCAL work_mem
         # Workers read their missed windows themselves, and fork with no helper thread running.
         measure = parallel_measure.measure(conn, mode)
