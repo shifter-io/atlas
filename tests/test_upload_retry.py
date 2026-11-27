@@ -226,9 +226,10 @@ async def test_a_blocked_orchestrator_loses_no_run_and_alerts_while_blocked(
         await asyncio.wait_for(many.wait(), 10)
         assert not upload.done()
         assert query(database, "SELECT status FROM batch_runs") == [("uploading",)]
-        watch.started = time.monotonic() - 299  # no 2xx since the process started 299 s ago
+        assert watch.waiting_at is not None
+        watch.waiting_at = time.monotonic() - 299  # as if the uploads had waited 299 s
         assert await check(db, watch) == {}
-        watch.started -= 2
+        watch.waiting_at -= 2
         stalled = await check(db, watch)
         assert stalled["stalled_s"] >= 301 and stalled["in_flight"] in (0, 1)
         await set_setting(db, "results.ingest_concurrency", 2000)
@@ -244,20 +245,26 @@ async def test_a_blocked_orchestrator_loses_no_run_and_alerts_while_blocked(
 
 
 def test_the_watch_counts_only_uploads_a_node_retries():
-    watch = ResultsWatch(started=0.0, alerted_at=None)
-    watch.began()
+    watch = ResultsWatch(alerted_at=None)
+    watch.began(now=0)
     watch.ended(409, now=10)  # refused for good: an answer, no stall
     assert watch.stalled(400, 300) is None
-    watch.began()
-    assert watch.stalled(400, 300) == 400  # in flight since before the limit, no 2xx yet
-    watch.ended(503, now=401)
-    assert watch.stalled(402, 300) == 402  # answered with a status the node retries
-    watch.began()
-    watch.ended(200, now=403)
-    assert watch.stalled(800, 300) is None  # a 2xx, then no upload: quiet, no stall
-    watch.began()
-    watch.ended(429, now=650)
-    assert watch.stalled(702, 300) is None and watch.stalled(704, 300) == 301
+    watch.began(now=1000)  # after a quiet spell: the wait begins now, not at the last 2xx
+    assert watch.stalled(1010, 300) is None
+    watch.ended(503, now=1010)  # answered with a status the node retries: still waiting
+    assert watch.stalled(1020, 300) is None
+    assert watch.stalled(1299, 300) is None and watch.stalled(1301, 300) == 301
+    watch.began(now=1302)
+    watch.ended(200, now=1303)
+    assert watch.stalled(5000, 300) is None  # a 2xx, then no upload: quiet, no stall
+    watch.began(now=5001)
+    watch.began(now=5002)
+    watch.ended(200, now=5003)  # one answered; the other waits from that 2xx
+    assert watch.stalled(5302, 300) is None and watch.stalled(5304, 300) == 301
+    watch.ended(429, now=5304)
+    watch.began(now=5305)
+    watch.ended(404, now=5306)  # a refusal for good does not end a retried wait
+    assert watch.stalled(5306, 300) == 303
     assert watch.open == 0
 
 
