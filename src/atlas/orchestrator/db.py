@@ -144,6 +144,10 @@ DEFAULTS: dict[str, Any] = {
     # The major alert results_stalled when no upload got a 2xx for this long while nodes upload
     # (orchestrator/results_watch.py, INGEST-HANG-2).
     "results.stalled_alert_minutes": 5,
+    # The job `memory` (orchestrator/memory.py, ORCH-MEM-1) raises the major alert
+    # orchestrator_memory while the process's resident memory is at or above this (MB); None
+    # measures and logs without an alert.
+    "orchestrator.memory_alert_mb": 4096,
     # The planner switches: when off, census_plan / pulse_plan record 'skipped' and plan nothing.
     "scheduler.census_enabled": True,
     "scheduler.pulse_enabled": True,
@@ -314,6 +318,15 @@ class Database:
     async def close(self) -> None:
         await self.drain()
         await self._close_idle()
+
+    def sizes(self) -> dict[str, int]:
+        """The pool's structures, for the memory gauge (memory.py)."""
+        return {
+            "db_idle_connections": len(self._idle),
+            "db_close_hooks": len(self._hooks),
+            "db_partitions_known": len(self._partitions),
+            "db_close_marks": len(_CLOSED),
+        }
 
     async def ensure_partition(self, table: str, moment: datetime) -> None:
         """partitions.partition for a monthly table (test_events) on a connection of its own, in

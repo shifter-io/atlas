@@ -62,6 +62,17 @@ RETRY_AFTER = 30
 _uploads = [0]  # census and pulse uploads this process is receiving or importing now
 
 
+def sizes() -> dict[str, int]:
+    """The uploads this process holds now, for the memory gauge (memory.py)."""
+    from .browser_ingest import _active
+
+    return {
+        "uploads_in_flight": _uploads[0],
+        "browser_bundles_in_flight": _active[0],
+        "results_watch_open": results_watch.WATCH.open,
+    }
+
+
 def _error(status: type[web.HTTPException], message: str) -> web.HTTPException:
     return status(text=json.dumps({"error": message}), content_type="application/json")
 

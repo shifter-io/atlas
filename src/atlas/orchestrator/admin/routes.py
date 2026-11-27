@@ -32,6 +32,7 @@ from aiohttp import web
 
 from ... import __version__
 from ..api import DB_KEY
+from ..memory import GAUGE_KEY
 from . import views, views_dashboard, writers
 
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
@@ -172,7 +173,7 @@ def _int(value: Any, name: str, low: int, high: int) -> int:
 async def health(request: web.Request) -> web.Response:
     async with request.app[DB_KEY].connection() as conn:
         await conn.execute("SELECT 1")
-    scheduler = request.app.get(SCHEDULER_KEY)
+    scheduler, gauge = request.app.get(SCHEDULER_KEY), request.app.get(GAUGE_KEY)
     return _json(
         {
             "ok": True,
@@ -180,6 +181,7 @@ async def health(request: web.Request) -> web.Response:
             "scheduler": scheduler is not None,
             "jobs": sorted(scheduler.tasks) if scheduler is not None else [],
             "now": datetime.now(UTC),
+            "memory": gauge.measure() if gauge is not None else None,
         }
     )
 

@@ -23,6 +23,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from ..enrichment import SharedEnricher
 from ..node_tls import CRL_BEGIN
 from ..providers.dbconnect import connect_options
 from . import pulse_enrich
@@ -36,8 +37,10 @@ from .api import (
     add_routes,
     node_auth,
 )
+from .api import sizes as upload_sizes
 from .db import Database
 from .jobs import register_jobs
+from .memory import GAUGE_KEY, MemoryGauge
 from .scheduler import Scheduler
 
 log = logging.getLogger(__name__)
@@ -73,6 +76,7 @@ def build_app(
         scheduler, database, str(credentials_file), Path(methodology) if methodology else None
     )
     app[SCHEDULER_KEY] = scheduler
+    app[GAUGE_KEY] = _gauge(database, scheduler, enricher)
     add_routes(app)
     admin.setup(
         app,
@@ -99,6 +103,21 @@ def build_app(
     app.on_startup.append(startup)
     app.on_cleanup.append(cleanup)
     return app
+
+
+def _gauge(
+    database: Database, scheduler: Scheduler, enricher: SharedEnricher | None
+) -> MemoryGauge:
+    """The process's memory gauge and its job `memory`, every 5 minutes (ORCH-MEM-1)."""
+    gauge = MemoryGauge([database.sizes, scheduler.sizes, upload_sizes])
+    if enricher is not None:
+        gauge.sources.append(lambda: {"dbip_lookups_cached": enricher.cached()})
+
+    async def memory_job() -> dict:
+        return await gauge.check(database)
+
+    scheduler.add("memory", memory_job, every_s=300)
+    return gauge
 
 
 def use_ingest_login(app: web.Application, ingest_file: str | None) -> None:

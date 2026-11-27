@@ -252,6 +252,11 @@ class Scheduler:
             task.cancel()
         await asyncio.gather(*fired, return_exceptions=True)
 
+    def sizes(self) -> dict[str, int]:
+        """The scheduler's structures, for the memory gauge (memory.py)."""
+        running = sum(task.running for task in self.tasks.values())
+        return {"jobs": len(self.tasks), "jobs_running": running, "jobs_fired": len(self._fired)}
+
     def upcoming(self) -> list[dict[str, Any]]:
         """Next fire time per job, for the admin UI."""
         return [
