@@ -49,6 +49,10 @@ login_pause               every minute (not at minutes 54-58): pause each networ
                           proxy login, in the manager root's files, with one Slack notice,
                           and end the paused networks' open outages as not measured
                           (login_pause.py, PROXY-AUTH-PAUSE-1 and -2)
+memory                    every 5 minutes (added by app.build_app): the process's resident memory
+                          and the sizes of what it keeps, logged and returned; the major alert
+                          orchestrator_memory at or above orchestrator.memory_alert_mb
+                          (memory.py, ORCH-MEM-1)
 
 job_table.register_jobs adds them to the scheduler. Besides the job, when a batch closes and
 `reports.dir` is set, the HTML report of that batch and the index are written there

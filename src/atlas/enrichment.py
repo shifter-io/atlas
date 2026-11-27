@@ -249,6 +249,11 @@ class SharedEnricher:
         with self._lock:
             return reenrich(directory, self._current())
 
+    def cached(self) -> int:
+        """The lookups the open enricher keeps (at most its cache_size); 0 before the first."""
+        enricher = self._enricher
+        return len(enricher.cache) if enricher is not None else 0
+
     def close(self) -> None:
         with self._lock:
             if self._enricher is not None:
