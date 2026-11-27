@@ -32,7 +32,7 @@ from aiohttp import web
 from .. import storage
 from ..browser.contracts import BROWSER_KIND, BROWSER_REGION, ERROR_CHECKSUM_MISMATCH, HEADER_SHA256
 from ..regions import resolve_region
-from . import nodework, pulse_enrich
+from . import nodework, pulse_enrich, results_watch
 from .archive import ArchiveError, check_rows, unpack
 from .db import Database, setting
 from .events import raise_alert
@@ -347,7 +347,22 @@ async def _reject(request: web.Request, batch_id: int, reason: str, kind: str) -
 
 
 async def results(request: web.Request) -> web.Response:
-    """A finished run directory (tar.gz): extract, ingest, link run_key, then the barrier."""
+    """A finished run directory (tar.gz): extract, ingest, link run_key, then the barrier. Each
+    upload and its answer are counted for the stall alert (results_watch, INGEST-HANG-2)."""
+    watch, status = results_watch.WATCH, 500  # an error or a node gone: an upload not answered
+    watch.began()
+    try:
+        response = await _results(request)
+        status = response.status
+        return response
+    except web.HTTPException as exc:
+        status = exc.status
+        raise
+    finally:
+        watch.ended(status)
+
+
+async def _results(request: web.Request) -> web.Response:
     db, node = request.app[DB_KEY], request[NODE_KEY]
     batch_id = _batch_id(request.query.get("batch_id"))
     run = await nodework.begin_upload(db, node, batch_id)

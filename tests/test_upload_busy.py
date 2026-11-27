@@ -14,7 +14,7 @@ import pytest
 from orchestrator_cases import planned_run, query, set_setting
 from test_storage import measurement
 
-from atlas import node, storage
+from atlas import node_upload, storage
 from atlas.orchestrator import api
 from atlas.orchestrator.archive import pack
 from atlas.storage import connect
@@ -81,5 +81,5 @@ async def test_an_import_waiting_for_a_lock_past_the_upload_s_wait_is_503(
 )
 def test_a_node_waits_for_the_orchestrator_s_retry_after(headers, seconds):
     refused = aiohttp.ClientResponseError(None, (), status=503, headers=headers)
-    assert node._retry_after(refused) == seconds
-    assert node._retry_after(aiohttp.ClientConnectionError()) == 0
+    assert node_upload.retry_after(refused) == seconds
+    assert node_upload.retry_after(aiohttp.ClientConnectionError()) == 0

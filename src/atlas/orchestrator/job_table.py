@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from . import batches, nodework, pulse
+from . import batches, nodework, pulse, results_watch
 from .browser import browser_plan
 from .db import Database
 from .scheduler import Scheduler
@@ -47,11 +47,15 @@ def _register_planners(scheduler: Scheduler, db: Database) -> None:
     async def offline() -> dict[str, Any]:
         return await nodework.mark_offline(db)
 
+    async def results_stalled() -> dict[str, Any]:
+        return await results_watch.check(db)
+
     scheduler.add("census_plan", census_plan, every_s=60, aligned=True)
     scheduler.add("pulse_plan", pulse_plan, every_s=60, aligned=True)
     scheduler.add("pulse_evaluate", pulse_evaluate, every_s=60)
     scheduler.add("reap", reap, every_s=60)
     scheduler.add("offline", offline, every_s=15)
+    scheduler.add("results_watch", results_stalled, every_s=60)
 
 
 def _register_data_jobs(

@@ -16,6 +16,7 @@ import pytest
 from helpers import FakeTransport
 
 from atlas import node as node_module
+from atlas import node_upload
 from atlas.models import ProxyConfig
 from atlas.node import (
     Active,
@@ -223,14 +224,15 @@ async def test_a_failure_report_that_cannot_be_sent_is_logged(tmp_path, caplog):
 
 
 async def test_an_upload_that_never_gets_through_gives_up(tmp_path, monkeypatch):
-    monkeypatch.setattr(node_module, "UPLOAD_ATTEMPTS", 2)
+    """A run the node does not know (no window of its own) retries for MIN_WINDOW."""
+    monkeypatch.setattr(node_upload, "MIN_WINDOW", timedelta(seconds=0.05))
     agent = make_agent(tmp_path, {"/v1/results": [OSError("unreachable")]}, upload_backoff=0)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "summary.json").write_text("{}")
-    with pytest.raises(RuntimeError, match="upload attempts exhausted"):
+    with pytest.raises(node_upload.UploadGaveUp, match=r"not accepted \(OSError\)"):
         await agent.upload(7, run_dir)
-    assert agent._call.paths() == ["/v1/results", "/v1/results"]
+    assert len(agent._call.paths()) >= 2 and set(agent._call.paths()) == {"/v1/results"}
     assert run_dir.exists()  # kept for the next try
 
 

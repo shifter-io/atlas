@@ -141,6 +141,9 @@ DEFAULTS: dict[str, Any] = {
     # with Retry-After before its body is read (INGEST-HANG-1). The healthy peak of 25 Nov 2026
     # was a few hundred (380 answered in one second); 26 Nov's blocked imports left 16,000.
     "results.ingest_concurrency": 2000,
+    # The major alert results_stalled when no upload got a 2xx for this long while nodes upload
+    # (orchestrator/results_watch.py, INGEST-HANG-2).
+    "results.stalled_alert_minutes": 5,
     # The planner switches: when off, census_plan / pulse_plan record 'skipped' and plan nothing.
     "scheduler.census_enabled": True,
     "scheduler.pulse_enabled": True,
