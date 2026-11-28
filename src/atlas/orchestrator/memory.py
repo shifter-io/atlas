@@ -11,7 +11,8 @@ measure below it. /admin/api/health shows the same numbers.
 
 ORCH-MEM-2: the measure also has what glibc's malloc holds in use and free (malloc.stats), and
 while `orchestrator.memory_trim` is on (the default) the job then gives malloc's free pages back
-to the system (malloc.trim, in a thread of its own) and logs the anonymous memory that freed.
+to the system (malloc.trim, in a thread of its own), logs the anonymous memory that freed and
+logs and alerts on the resident sizes measured after it.
 """
 
 from __future__ import annotations
@@ -89,8 +90,8 @@ class MemoryGauge:
         async with db.connection() as conn:
             limit = await setting(conn, "orchestrator.memory_alert_mb")
             trimming = await setting(conn, "orchestrator.memory_trim")
-        if trimming:
-            found["trimmed_mb"] = await self.trim(found.get("anon_mb"))
+        if trimming:  # the resident sizes logged and alerted on are the ones after the trim
+            found |= await self.trim(found.get("anon_mb"))
         log.info("memory %s", " ".join(f"{k}={v}" for k, v in _flat(found)))
         rss = found.get("rss_mb")
         if rss is None or limit is None:
@@ -108,11 +109,14 @@ class MemoryGauge:
                 )
         return found
 
-    async def trim(self, anon_mb: int | None) -> int:
-        """malloc.trim in the gauge's thread; the anonymous MB it gave back (0 unknown)."""
+    async def trim(self, anon_mb: int | None) -> dict[str, int]:
+        """malloc.trim in the gauge's thread: the resident sizes after it, and the anonymous MB
+        it gave back (trimmed_mb; 0 when unknown)."""
         await asyncio.get_running_loop().run_in_executor(self._trimmer, malloc.trim)
-        after = resident().get("anon_mb")
-        return max(0, anon_mb - after) if anon_mb is not None and after is not None else 0
+        after = resident()
+        now = after.get("anon_mb")
+        gave = max(0, anon_mb - now) if anon_mb is not None and now is not None else 0
+        return after | {"trimmed_mb": gave}
 
 
 GAUGE_KEY: web.AppKey[MemoryGauge] = web.AppKey("memory_gauge", MemoryGauge)

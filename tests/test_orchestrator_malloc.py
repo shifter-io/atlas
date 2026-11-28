@@ -4,7 +4,7 @@ import logging
 import threading
 
 import pytest
-from orchestrator_cases import set_setting
+from orchestrator_cases import query, set_setting
 
 from atlas.orchestrator import malloc, memory
 from atlas.orchestrator.memory import MemoryGauge, resident
@@ -88,3 +88,12 @@ async def test_with_trimming_off_the_job_only_measures(db, monkeypatch):
     await set_setting(db, "orchestrator.memory_trim", False)
     found = await MemoryGauge().check(db)
     assert "trimmed_mb" not in found and libc.trims == []
+
+
+async def test_the_alert_compares_the_memory_left_after_the_trim(database, db, monkeypatch):
+    readings = iter([{"rss_mb": 5000, "anon_mb": 4000}, {"rss_mb": 3000, "anon_mb": 2000}])
+    monkeypatch.setattr(memory, "resident", lambda: next(readings))
+    monkeypatch.setattr(malloc, "trim", lambda: True)
+    found = await MemoryGauge().check(db)  # the default limit, 4096 MB
+    assert (found["rss_mb"], found["anon_mb"], found["trimmed_mb"]) == (3000, 2000, 2000)
+    assert query(database, "SELECT count(*) FROM alerts") == [(0,)]

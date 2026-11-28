@@ -59,8 +59,9 @@ LIBC = load()
 
 def stats(libc: Any | None = LIBC) -> dict[str, int]:
     """What malloc holds in MB: in use (malloc_used_mb) and free inside its arenas
-    (malloc_free_mb, which trim() can give back); {} off glibc. In use rising with time is a
-    leak; free rising while in use stays flat is the allocator keeping freed memory."""
+    (malloc_free_mb); {} off glibc. In use rising with time is a leak. Free counts the pages a
+    trim already gave back too (still malloc's, no longer resident): what trim() frees shows as
+    the job's trimmed_mb and in anon_mb, not here."""
     if libc is None:
         return {}
     info = libc.mallinfo2()
