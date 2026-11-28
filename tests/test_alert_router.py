@@ -210,6 +210,8 @@ def test_the_policy_table(tmp_path: Path) -> None:
         # The page rules of 28 Nov 2026 (#1435), first match before the digest lines.
         "manager:pulse_nodes_lost:20261128T10": ("page", 15 * MIN),
         "manager:pulse_cells_lost:20261128T10": ("digest", 0),
+        "manager:browser_host_over_limit:mini-2": ("page", 60 * MIN),
+        "manager:browser_run_abandoned:mini-2:20261128": ("page", 15 * MIN),
         "event:atlas-hourly-1764324000.service": ("page", 0),
         "event:atlas-pulse-1764324000.service": ("page", 0),
         "event:test machines": ("page", 0),
