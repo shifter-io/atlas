@@ -19,6 +19,7 @@ NODE_MAX=1800         # a browser mini's last heartbeat (30 minutes)
 CONN_PART=80          # percent of the API login's connection limit
 CONN_LIMIT=20         # the API login's limit when the role has none
 CERT_DAYS=14          # the public certificate's days left
+CERT_STRIKES=3        # failed certificate checks in a row before one counts (a short stall of the site)
 NET_DOWN_MIN=5        # open pulse outages in this many countries: the network is down
 SNAP_GRACE=900        # how long the public answers may show two builds (a new one reaching the CDN)
 # The public answers that must come from one build: the siteapi's ConsistencyRequests (consistent.go).
@@ -104,10 +105,26 @@ if len(groups) > 1:
   return 1
 }
 
+# Runs a check ($3..) that fails only after $2 failures in a row; the count is $STATE/$1.strikes.
+strikes() {
+  local file=$STATE/$1.strikes count out
+  if out=$("${@:3}" 2>&1); then rm -f "$file"; return 0; fi
+  count=$(cat "$file" 2> /dev/null) || true
+  [[ $count =~ ^[0-9]+$ ]] || count=0
+  count=$(( count + 1 ))
+  echo "$count" > "$file"
+  (( count >= $2 )) || return 0
+  echo "$out"
+  return 1
+}
+
+# The public certificate's end date. An empty read (the site did not answer) is no date: GNU date
+# reads "" as today 00:00, which would say "expires in 0 day(s)" (CERT-CHECK-1).
 cert_ok() {
   local end left
   end=$(timeout 10 openssl s_client -servername "$PUBLIC" -connect "$PUBLIC:443" < /dev/null 2> /dev/null \
     | openssl x509 -noout -enddate 2> /dev/null || true)
+  [[ $end == notAfter=?* ]] || { echo "no certificate read from $PUBLIC"; return 1; }
   end=$(date -d "${end#notAfter=}" +%s 2> /dev/null) || { echo "no certificate read from $PUBLIC"; return 1; }
   left=$(( (end - $(now)) / 86400 ))
   (( left >= CERT_DAYS )) || { echo "the certificate of $PUBLIC expires in $left day(s)"; return 1; }
@@ -314,7 +331,7 @@ check_public() {
   health "public $PUBLIC/healthz" public_ok /healthz
   health "public $PUBLIC/v1/version" public_ok /v1/version
   health "public $PUBLIC snapshot" snapshot_ok
-  health "certificate $PUBLIC" cert_ok
+  health "certificate $PUBLIC" strikes cert "$CERT_STRIKES" cert_ok
 }
 
 check_more() {

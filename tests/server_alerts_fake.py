@@ -88,6 +88,8 @@ elif tool == "curl":
         if not (fake / f"healthz-{port}").exists():
             sys.exit(7)
         print(text(f"healthz-{port}"))
+elif tool == "openssl" and args[0] == "x509" and (fake / "cert-none").exists():
+    sys.exit(1)  # the site did not answer: no certificate, nothing printed
 elif tool == "openssl" and args[0] == "x509":
     print("notAfter=" + text("cert-end", "Jan  1 00:00:00 2030 GMT"))
 elif tool == "openssl" and ":443" in args[args.index("-connect") + 1]:
