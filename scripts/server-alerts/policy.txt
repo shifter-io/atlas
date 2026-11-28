@@ -25,12 +25,13 @@ manager:job_stuck:calculate* | now | 0 | 6 | Read the calculate job's timing lin
 # Expected or budgeted: a gap in data, not an outage.
 manager:pulse_runs_open* | digest | 0 | 6 |
 manager:pulse_cells_lost* | digest | 0 | 6 |
-manager:pulse_nodes_lost* | digest | 0 | 6 |
+manager:pulse_nodes_lost* | page | 15 | 6 | Pulse nodes were lost before the hour's end: check the manager (a reset?) and the hour report.
 manager:coverage_* | digest | 0 | 6 |
 manager:network_resumed* | digest | 0 | 6 |
 # The hourly archive upload retries every hour: data is at risk after 3 hours.
 manager:job_failed:raw_upload* | page | 180 | 6 | Read the raw_upload job's error in the manager journal (the Canada server runbook).
 manager:job_failed:* | page | 15 | 6 | Read the job's error in the manager journal (the Canada server runbook).
+manager:browser_host_over_limit* | page | 60 | 6 | A browser host stayed over its limit for an hour: check the mini's queue and the host's slots.
 manager:* | page | 15 | 6 | Open the manager's alerts list and follow the alert's text.
 # A network failing about 100% of its tests for more than 30 minutes.
 network-down:* | page | 30 | 6 | Check the provider's status page and our account; the pulses go on.
@@ -48,6 +49,9 @@ check-failed:queue | page | 60 | 6 | Look at the mini's browser node log; restar
 check-failed:uploads | page | 60 | 6 | Check the mini's network and its upload log.
 check-failed:* | page | 15 | 6 | Follow the check's text; the runbook lists each check.
 # One-off lines (a failed hourly test, a create_failed) and informational messages.
+event:atlas-hourly-* | page | 0 | 6 | Read journalctl --user -u <object>: the hourly test failed.
+event:atlas-pulse-* | page | 0 | 6 | Read journalctl --user -u <object>: the pulse hour crashed.
+event:test machines | page | 0 | 6 | Read the create_failed line in the orchestrator journal.
 event:* | digest | 0 | 6 |
 info:* | digest | 0 | 6 |
 * | page | 15 | 6 | Follow the alert's text.

@@ -207,7 +207,20 @@ def test_the_policy_table(tmp_path: Path) -> None:
         "check-failed:queue": ("page", 60 * MIN),
         "network-down:network proxy-cheap residential": ("page", 30 * MIN),
         "restarted:atlas-caddy.service": ("digest", 0),
-        "event:atlas-hourly-1.service": ("digest", 0),
+        # The page rules of 28 Nov 2026 (#1435), first match before the digest lines.
+        "manager:pulse_nodes_lost:20261128T10": ("page", 15 * MIN),
+        "manager:pulse_cells_lost:20261128T10": ("digest", 0),
+        "manager:browser_host_over_limit:mini-2": ("page", 60 * MIN),
+        "manager:browser_run_abandoned:mini-2:20261128": ("page", 15 * MIN),
+        "event:atlas-hourly-1764324000.service": ("page", 0),
+        "event:atlas-pulse-1764324000.service": ("page", 0),
+        "event:test machines": ("page", 0),
+        "event:atlas-caddy.service": ("digest", 0),
+        "info:deployed": ("digest", 0),
+        # Every pause reason (407 login, 402 payment, forbidden host) has the same key forms.
+        "manager:network_paused:7:20261128T103000": ("now", 0),
+        "manager:proxy_login_refused:7:20261128T10": ("now", 0),
+        "manager:proxy_login_refused:7:daily:20261128T10": ("now", 0),
     }
     for name, (action, grace) in expect.items():
         rule = router.rule_for(rules, name)
@@ -322,3 +335,50 @@ def test_a_bot_file_without_a_channel_is_a_failed_post(tmp_path, monkeypatch, co
     (config / "alert-router").write_text("live\n")
     (config / "slack-bot").write_text("bot-secret-only\n")
     assert main_run(tmp_path, monkeypatch, opened(LOGIN, kind="proxy_login_refused"), T0) == 3
+
+
+NODES_LOST = "manager:pulse_nodes_lost:20270115T07"
+
+
+def test_lost_pulse_nodes_page_after_15_minutes_and_runs_left_open_stay_digest(world) -> None:
+    lost = opened(NODES_LOST, kind="pulse_nodes_lost", text="pulse hour 07: 2 of 9 nodes lost")
+    gap = opened("manager:pulse_runs_open:20270115T07:proxy-cheap/lon1", kind="pulse_runs_open")
+    assert world.run(lost, gap, "sweep\tmanager:") == []
+    world.later(14)
+    assert world.run(lost, gap, "sweep\tmanager:") == []  # within its grace
+    world.later(1)
+    [(kind, text, _)] = world.run(lost, gap, "sweep\tmanager:")
+    assert kind == "page" and "2 of 9 nodes lost" in text and "pulse_runs_open" not in text
+    assert "within 15 min" in text and "check the manager (a reset?)" in text
+    restart = opened("atlas-caddy.service", kind="restarted")
+    assert world.run(lost, gap, restart, "sweep\tmanager:") == []  # paged once; restart: digest
+
+
+def test_a_failed_hour_unit_or_create_failed_pages_at_once_with_its_unit(world) -> None:
+    hourly, pulse = "atlas-hourly-1768464000.service", "atlas-pulse-1768464000.service"
+    posts = world.run(
+        f"once\t{hourly}\tevent\tthe hourly test failed (journalctl --user -u {hourly})",
+        f"once\t{pulse}\tevent\tthe pulse hour stopped with an error",
+        "once\ttest machines\tevent\tcreate_failed: no capacity",
+        "once\tatlas-caddy.service\tevent\tsomething else",
+    )
+    assert [kind for kind, _, _ in posts] == ["page", "page", "page"]
+    hourly_text, pulse_text, machines_text = (text for _, text, _ in posts)
+    assert f"Read journalctl --user -u {hourly}: the hourly test failed." in hourly_text
+    assert f"Read journalctl --user -u {pulse}: the pulse hour crashed." in pulse_text
+    assert "Read the create_failed line in the orchestrator journal." in machines_text
+    assert "something else" not in "".join(text for _, text, _ in posts)  # other events: digest
+
+
+@pytest.mark.parametrize(
+    "why",
+    [
+        "refused our login (HTTP 401, 403 or 407 on 40 of 50 requests)",
+        "payment required (HTTP 402 on 40 of 50 requests)",
+        "refuses our account the IP-check host (HTTP 403 forbidden host on 40 of 50 requests)",
+    ],
+)
+def test_every_pause_reason_pages_at_once(world: World, why: str) -> None:
+    pause = opened("manager:network_paused:7:20270115T075900", kind="network_paused", text=why)
+    [(kind, text, _)] = world.run(pause, "sweep\tmanager:")
+    assert kind == "page" and why in text and "did not heal" not in text  # no grace
