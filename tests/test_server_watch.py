@@ -78,7 +78,7 @@ def test_host_checks_run_once_for_both_environments(server: Server) -> None:
     assert [t.split(": ")[1] for t in server.posts()] == ["memory"]
 
 
-def test_public_site_contract_and_certificate(server: Server) -> None:
+def test_public_site_contract(server: Server) -> None:
     server.set("public-down-healthz", "")
     once(
         server,
@@ -93,13 +93,53 @@ def test_public_site_contract_and_certificate(server: Server) -> None:
         "https://atlas.shifter.io/v1/version: missing builtAt, contract",
         lambda: server.set("public-v1-version", None),
     )
-    server.set("cert-end", openssl_date(server.now + 10 * 86400 + 60))
+
+
+CERT = "certificate atlas.shifter.io"
+
+
+def quiet_twice(server: Server) -> None:
+    """A certificate check fails only on its third failure in a row (CERT-CHECK-1)."""
+    assert server.check() == []
+    assert server.check() == []
+
+
+def test_a_certificate_with_few_days_left_pages_after_its_grace(server: Server) -> None:
+    server.set("cert-end", openssl_date(server.now + 5 * 86400 + 60))
+    quiet_twice(server)
     once(
         server,
-        "certificate atlas.shifter.io",
-        "the certificate of atlas.shifter.io expires in 10 day(s)",
+        CERT,
+        "the certificate of atlas.shifter.io expires in 5 day(s)",
         lambda: server.set("cert-end", openssl_date(server.now + 14 * 86400)),
     )
+    server.set("cert-end", openssl_date(server.now + 40 * 86400))
+    for _ in range(4):
+        assert server.check() == []
+
+
+def test_an_empty_certificate_read_is_no_certificate_not_0_days(server: Server) -> None:
+    server.set("cert-none", "")
+    quiet_twice(server)
+    once(
+        server,
+        CERT,
+        "no certificate read from atlas.shifter.io",
+        lambda: server.set("cert-none", None),
+    )
+
+
+def test_a_certificate_read_that_heals_within_its_grace_posts_nothing(server: Server) -> None:
+    server.set("cert-none", "")
+    quiet_twice(server)
+    server.set("cert-none", None)
+    assert server.check() == []
+    server.set("cert-none", "")
+    quiet_twice(server)  # the count starts again after a good read
+    state = server.home / "atlas" / "production" / "alerts-state"
+    (state / "cert.strikes").write_text("not a number\n")
+    assert server.check() == []
+    assert (state / "cert.strikes").read_text() == "1\n"
 
 
 def test_staging_watches_its_own_public_name(server: Server) -> None:
