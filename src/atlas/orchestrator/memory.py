@@ -8,20 +8,28 @@ requests (MemoryGauge.sizes). It logs them on one line, returns them (the job's 
 in the admin's jobs list) and raises the major alert `orchestrator_memory` while the resident
 memory is at or above `orchestrator.memory_alert_mb`; the alert is acknowledged at the first
 measure below it. /admin/api/health shows the same numbers.
+
+ORCH-MEM-2: the measure also has what glibc's malloc holds in use and free (malloc.stats), and
+while `orchestrator.memory_trim` is on (the default) the job then gives malloc's free pages back
+to the system (malloc.trim, in a thread of its own), logs the anonymous memory that freed and
+logs and alerts on the resident sizes measured after it.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import resource
 import sys
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 from aiohttp import web
 
+from . import malloc
 from .db import Database, setting
 from .events import raise_alert
 
@@ -57,6 +65,8 @@ class MemoryGauge:
 
     def __init__(self, sources: list[Sizes] | None = None) -> None:
         self.sources = list(sources or [])
+        # Its own thread: the default executor's can all be busy with imports for minutes.
+        self._trimmer = ThreadPoolExecutor(1, thread_name_prefix="malloc-trim")
 
     def measure(self) -> dict[str, Any]:
         structures: dict[str, Any] = {}
@@ -66,21 +76,27 @@ class MemoryGauge:
             except Exception as exc:  # boundary: a gauge must never fail its job
                 name = getattr(source, "__qualname__", "source")
                 structures[name] = f"unreadable ({type(exc).__name__})"
-        return resident() | {
+        found = resident() | malloc.stats()
+        return found | {
             "threads": threading.active_count(),
             "python_blocks": sys.getallocatedblocks(),
             "structures": dict(sorted(structures.items())),
         }
 
     async def check(self, db: Database) -> dict[str, Any]:
-        """The job `memory`: log the measure, alert at or above the limit, acknowledge below."""
+        """The job `memory`: measure, trim when on, log, alert at or above the limit,
+        acknowledge below."""
         found = self.measure()
+        async with db.connection() as conn:
+            limit = await setting(conn, "orchestrator.memory_alert_mb")
+            trimming = await setting(conn, "orchestrator.memory_trim")
+        if trimming:  # the resident sizes logged and alerted on are the ones after the trim
+            found |= await self.trim(found.get("anon_mb"))
         log.info("memory %s", " ".join(f"{k}={v}" for k, v in _flat(found)))
         rss = found.get("rss_mb")
+        if rss is None or limit is None:
+            return found
         async with db.transaction() as conn:
-            limit = await setting(conn, "orchestrator.memory_alert_mb")
-            if rss is None or limit is None:
-                return found
             if rss >= int(limit):
                 message = f"the orchestrator holds {rss} MB resident (alert at {int(limit)} MB)"
                 data = {"limit_mb": int(limit)} | found
@@ -92,6 +108,15 @@ class MemoryGauge:
                     (KIND,),
                 )
         return found
+
+    async def trim(self, anon_mb: int | None) -> dict[str, int]:
+        """malloc.trim in the gauge's thread: the resident sizes after it, and the anonymous MB
+        it gave back (trimmed_mb; 0 when unknown)."""
+        await asyncio.get_running_loop().run_in_executor(self._trimmer, malloc.trim)
+        after = resident()
+        now = after.get("anon_mb")
+        gave = max(0, anon_mb - now) if anon_mb is not None and now is not None else 0
+        return after | {"trimmed_mb": gave}
 
 
 GAUGE_KEY: web.AppKey[MemoryGauge] = web.AppKey("memory_gauge", MemoryGauge)

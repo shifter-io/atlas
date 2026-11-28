@@ -148,6 +148,9 @@ DEFAULTS: dict[str, Any] = {
     # orchestrator_memory while the process's resident memory is at or above this (MB); None
     # measures and logs without an alert.
     "orchestrator.memory_alert_mb": 4096,
+    # After each measure the job `memory` gives glibc malloc's free pages back to the system
+    # (malloc_trim; orchestrator/malloc.py, ORCH-MEM-2); False only measures.
+    "orchestrator.memory_trim": True,
     # The planner switches: when off, census_plan / pulse_plan record 'skipped' and plan nothing.
     "scheduler.census_enabled": True,
     "scheduler.pulse_enabled": True,
